@@ -1,9 +1,6 @@
 // index.js
 
-
-
 const {
-
   Client,
 
   GatewayIntentBits,
@@ -15,7 +12,6 @@ const {
   ActionRowBuilder,
 
   ButtonStyle,
-
 } = require("discord.js");
 
 const EventHandlers = require("./src/utils/eventHandlers");
@@ -46,8 +42,6 @@ const StatsDisplayHandler = require("./src/utils/StatsDisplayHandler");
 
 const AdminLogger = require("./src/utils/AdminLogger");
 
-
-
 const COMMAND_PREFIX = "$";
 
 const ALLOWED_CHANNEL_ID = "1300201044730445864";
@@ -56,20 +50,12 @@ const MAX_RETRIES = 3;
 
 const RETRY_DELAY = 1000;
 
-
-
 let isClientReady = false;
-
-
 
 require("dotenv").config();
 
-
-
 function checkEnvironmentVariables() {
-
   const requiredVars = [
-
     "DISCORD_TOKEN",
 
     "ANTHROPIC_API_KEY",
@@ -79,35 +65,23 @@ function checkEnvironmentVariables() {
     "PAYPAL_CLIENT_ID",
 
     "PAYPAL_CLIENT_SECRET",
-
   ];
 
   const missing = requiredVars.filter((varName) => !process.env[varName]);
 
   if (missing.length > 0) {
-
     console.error(
-
       `Missing required environment variables: ${missing.join(", ")}`
-
     );
 
     process.exit(1);
-
   }
-
 }
-
-
 
 checkEnvironmentVariables();
 
-
-
 const client = new Client({
-
   intents: [
-
     GatewayIntentBits.Guilds,
 
     GatewayIntentBits.GuildMessages,
@@ -115,93 +89,57 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
 
     GatewayIntentBits.GuildMessageReactions,
-
   ],
-
 });
-
-
 
 global.discordClient = client;
 
-
-
 async function retryCommand(fn, maxRetries = MAX_RETRIES) {
-
   for (let i = 0; i < maxRetries; i++) {
-
     try {
-
       return await fn();
-
     } catch (error) {
-
       if (i === maxRetries - 1) throw error;
 
       console.error(`Attempt ${i + 1} failed:`, error);
 
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
-
     }
-
   }
-
 }
 
-
-
 async function checkAccess(guildId, eventId = null) {
-
   if (!client.isReady()) {
-
     console.error("Error: Discord client is not ready.");
 
     return false;
-
   }
 
-
-
   try {
-
     return await database.verifyAccess(guildId, eventId);
-
   } catch (error) {
-
     console.error("Error checking access:", error);
 
     return false;
-
   }
-
 }
 
-
-
 client.once("ready", async () => {
-
   isClientReady = true;
 
   console.log(`Bot is ready as ${client.user.tag}`);
 
   console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
 
-
-
   // Log initial stats
 
   await AdminLogger.logServerStats(client);
 
-
-
   // Log stats every 6 hours
 
   setInterval(async () => {
-
     await AdminLogger.logServerStats(client);
-
   }, 6 * 60 * 60 * 1000);
-
 });
 
 client.on("messageCreate", async (message) => {
@@ -230,9 +168,9 @@ client.on("messageCreate", async (message) => {
           .setDescription(
             "This server needs to purchase access to use Fight Genie predictions."
           )
-          .setAuthor({ 
-            name: 'Fight Genie',
-            iconURL: 'attachment://FightGenie_Logo_1.PNG'
+          .setAuthor({
+            name: "Fight Genie",
+            iconURL: "attachment://FightGenie_Logo_1.PNG",
           })
           .addFields({
             name: "How to Purchase",
@@ -240,107 +178,102 @@ client.on("messageCreate", async (message) => {
               "Use the `$buy` command to see our special lifetime access offer! Or swoop in for event access at $6.99 per event.",
           });
 
-        await message.reply({ 
+        await message.reply({
           embeds: [embed],
-          files: [{
-            attachment: './src/images/FightGenie_Logo_1.PNG',
-            name: 'FightGenie_Logo_1.PNG'
-          }]
+          files: [
+            {
+              attachment: "./src/images/FightGenie_Logo_1.PNG",
+              name: "FightGenie_Logo_1.PNG",
+            },
+          ],
         });
         return;
       }
     }
 
-      switch (command) {
-        case "buy":
-          await PaymentCommand.handleBuyCommand(message);
-          break;
+    switch (command) {
+      case "buy":
+        await PaymentCommand.handleBuyCommand(message);
+        break;
 
-        case "upcoming":
-          await retryCommand(async () => {
-              const loadingEmbed = new EmbedBuilder()
-                  .setColor("#ffff00")
-                  .setTitle("Loading Upcoming Event Data")
-                  .setDescription("Fetching upcoming event information...");
-      
-              const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
-      
-              try {
-                  const event = await EventHandlers.getUpcomingEvent();
-                  if (!event) {
-                      await loadingMsg.edit({
-                          content: "No upcoming events found.",
-                          embeds: [],
-                      });
-                      return;
-                  }
-      
-                  const response = await EventHandlers.createEventEmbed(event, false);
-                  
-                  // Check access to determine if we should show the buy prompt
-                  const hasAccess = await database.verifyAccess(message.guild.id, event.event_id);
-                  
-                  if (!hasAccess) {
-                      // Add a field to the embed prompting to buy
-                      response.embeds[0].addFields({
-                          name: '🔒 Access Required',
-                          value: [
-                              'Purchase Fight Genie access to see:',
-                              '• AI-powered fight predictions',
-                              '• Detailed fighter analysis',
-                              '• Betting insights and recommendations',
-                              '• Live odds integration',
-                              '',
-                              'Use `$buy` to see pricing options!'
-                          ].join('\n'),
-                          inline: false
-                      });
-      
-                      // Replace prediction buttons with buy button
-                      response.components = [
-                          new ActionRowBuilder()
-                              .addComponents(
-                                  new ButtonBuilder()
-                                      .setCustomId('buy_server_access')
-                                      .setLabel('Get Fight Genie Access')
-                                      .setEmoji('🌟')
-                                      .setStyle(ButtonStyle.Success)
-                              )
-                      ];
-                  }
-      
-                  await loadingMsg.edit(response);
-              } catch (error) {
-                  console.error("Error creating upcoming event embed:", error);
-                  await loadingMsg.edit({
-                      content: "Error loading upcoming event data. Please try again.",
-                      embeds: [],
-                  });
-              }
-          });
-          break;
+      case "upcoming":
+        await retryCommand(async () => {
+          const loadingEmbed = new EmbedBuilder()
+            .setColor("#ffff00")
+            .setTitle("Loading Upcoming Event Data")
+            .setDescription("Fetching upcoming event information...");
 
+          const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
+
+          try {
+            const event = await EventHandlers.getUpcomingEvent();
+            if (!event) {
+              await loadingMsg.edit({
+                content: "No upcoming events found.",
+                embeds: [],
+              });
+              return;
+            }
+
+            const response = await EventHandlers.createEventEmbed(event, false);
+
+            // Check access to determine if we should show the buy prompt
+            const hasAccess = await database.verifyAccess(
+              message.guild.id,
+              event.event_id
+            );
+
+            if (!hasAccess) {
+              // Add a field to the embed prompting to buy
+              response.embeds[0].addFields({
+                name: "🔒 Access Required",
+                value: [
+                  "Purchase Fight Genie access to see:",
+                  "• AI-powered fight predictions",
+                  "• Detailed fighter analysis",
+                  "• Betting insights and recommendations",
+                  "• Live odds integration",
+                  "",
+                  "Use `$buy` to see pricing options!",
+                ].join("\n"),
+                inline: false,
+              });
+
+              // Replace prediction buttons with buy button
+              response.components = [
+                new ActionRowBuilder().addComponents(
+                  new ButtonBuilder()
+                    .setCustomId("buy_server_access")
+                    .setLabel("Get Fight Genie Access")
+                    .setEmoji("🌟")
+                    .setStyle(ButtonStyle.Success)
+                ),
+              ];
+            }
+
+            await loadingMsg.edit(response);
+          } catch (error) {
+            console.error("Error creating upcoming event embed:", error);
+            await loadingMsg.edit({
+              content: "Error loading upcoming event data. Please try again.",
+              embeds: [],
+            });
+          }
+        });
+        break;
 
       case "model":
-
         await ModelCommand.handleModelCommand(message, args);
 
         break;
 
-
-
       case "checkstats":
-
         await CheckStatsCommand.handleCheckStats(message, args);
 
         break;
 
-
-
       case "stats":
-
         await retryCommand(async () => {
-
           const loadingEmbed = new EmbedBuilder()
 
             .setColor("#ffff00")
@@ -349,77 +282,51 @@ client.on("messageCreate", async (message) => {
 
             .setDescription("Fetching and analyzing prediction accuracy...");
 
-
-
           const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
-
-
           try {
-
             await database.updatePredictionOutcomes();
 
             const stats = await ModelStatsCommand.getEnhancedModelStats();
 
-            const statsEmbed = ModelStatsCommand.createEnhancedStatsEmbed(stats);
+            const statsEmbed =
+              ModelStatsCommand.createEnhancedStatsEmbed(stats);
 
             await loadingMsg.edit({ embeds: [statsEmbed] });
-
           } catch (error) {
-
             console.error("Error handling model stats command:", error);
 
             await loadingMsg.edit({
-
-              content: "An error occurred while fetching Fight Genie statistics.",
+              content:
+                "An error occurred while fetching Fight Genie statistics.",
 
               embeds: [],
-
             });
-
           }
-
         });
 
         break;
 
-
-
       case "help":
-
         const helpEmbed = createHelpEmbed();
 
         await message.reply({ embeds: [helpEmbed] });
 
         break;
 
-
-
       default:
-
         await message.reply(
-
           `Unknown command. Use ${COMMAND_PREFIX}help to see available commands.`
-
         );
-
     }
-
   } catch (error) {
-
     console.error("Command error:", error);
 
     await message.reply(
-
       "An error occurred while processing your request. Please try again later."
-
     );
-
   }
-
 });
-
-
 
 client.on("interactionCreate", async (interaction) => {
   if (!client.isReady()) {
@@ -448,14 +355,21 @@ client.on("interactionCreate", async (interaction) => {
       if (!interaction.deferred && !interaction.replied) {
         await interaction.deferUpdate().catch(console.error);
       }
-  
+
       const [action, ...args] = interaction.customId.split("_");
-  
+
       // Check access for prediction-related buttons
-      if (action === "predict" || action === "analysis" || action === "betting") {
+      if (
+        action === "predict" ||
+        action === "analysis" ||
+        action === "betting"
+      ) {
         const eventId = args[args.length - 1];
-        const hasAccess = await database.verifyAccess(interaction.guild.id, eventId);
-        
+        const hasAccess = await database.verifyAccess(
+          interaction.guild.id,
+          eventId
+        );
+
         if (!hasAccess) {
           const embed = new EmbedBuilder()
             .setColor("#ff0000")
@@ -463,22 +377,24 @@ client.on("interactionCreate", async (interaction) => {
             .setDescription(
               "This server needs to purchase access to use Fight Genie predictions."
             )
-            .setAuthor({ 
-              name: 'Fight Genie',
-              iconURL: 'attachment://FightGenie_Logo_1.PNG'
+            .setAuthor({
+              name: "Fight Genie",
+              iconURL: "attachment://FightGenie_Logo_1.PNG",
             })
             .addFields({
               name: "How to Purchase",
               value:
                 "Use the `$buy` command to see our special lifetime access offer! Or swoop in for event access at $6.99 per event.",
             });
-  
-          await interaction.editReply({ 
+
+          await interaction.editReply({
             embeds: [embed],
-            files: [{
-              attachment: './src/images/FightGenie_Logo_1.PNG',
-              name: 'FightGenie_Logo_1.PNG'
-            }]
+            files: [
+              {
+                attachment: "./src/images/FightGenie_Logo_1.PNG",
+                name: "FightGenie_Logo_1.PNG",
+              },
+            ],
           });
           return;
         }
@@ -488,7 +404,7 @@ client.on("interactionCreate", async (interaction) => {
         case "buy":
           await PaymentHandler.handlePayment(interaction);
           break;
-          
+
         case "verify":
           if (args[0] === "payment") {
             const [orderId, serverId] = args.slice(1);
@@ -510,7 +426,10 @@ client.on("interactionCreate", async (interaction) => {
         case "scrape":
           if (args[0] === "stats") {
             const fighterName = args.slice(1).join(" ");
-            await CheckStatsCommand.handleScrapeButton(interaction, fighterName);
+            await CheckStatsCommand.handleScrapeButton(
+              interaction,
+              fighterName
+            );
           }
           break;
 
@@ -528,6 +447,35 @@ client.on("interactionCreate", async (interaction) => {
         case "next":
         case "analysis":
           await EventHandlers.handleButtonInteraction(interaction);
+          break;
+
+        case "get":
+          if (args[0] === "analysis") {
+            const event = await EventHandlers.getUpcomingEvent();
+            const currentModel = ModelCommand.getCurrentModel();
+            const predictions = await PredictionHandler.getStoredPrediction(
+              event.event_id,
+              "main",
+              currentModel
+            );
+
+            await PredictionHandler.sendDetailedAnalysis(
+              interaction,
+              predictions,
+              event,
+              currentModel
+            );
+          }
+          break;
+
+        case "betting":
+          if (args[0] === "analysis") {
+            const event = await EventHandlers.getUpcomingEvent();
+            await PredictionHandler.handleBettingAnalysis(
+              interaction,
+              event.event_id
+            );
+          }
           break;
 
         case "show":
@@ -567,16 +515,75 @@ client.on("interactionCreate", async (interaction) => {
           }
           break;
 
-        case "betting":
-          if (args[0] === "analysis") {
-            const eventId = args[1];
-            await PredictionHandler.handleBettingAnalysis(interaction, eventId);
-          }
-          break;
-
         case "toggle":
           if (args[0] === "prelims") {
             await PredictCommand.handlePrelimToggle(interaction);
+          }
+          break;
+
+        case "get":
+          if (args[0] === "analysis") {
+            try {
+              const eventId = args[1]; // Get eventId from button customId
+              const event = await EventHandlers.getUpcomingEvent();
+              if (!event) {
+                await interaction.editReply({
+                  content: "No upcoming events found.",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              const currentModel = ModelCommand.getCurrentModel();
+              console.log("Getting predictions for analysis:", {
+                eventId: event.event_id,
+                model: currentModel,
+              });
+
+              // Get stored predictions
+              const predictions = await PredictionHandler.getStoredPrediction(
+                event.event_id,
+                "main", // Always use main card for detailed analysis
+                currentModel
+              );
+
+              if (!predictions) {
+                await interaction.editReply({
+                  content:
+                    "No predictions found for this event. Please generate predictions first.",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              try {
+                // Try to send DM
+                await interaction.user.send({
+                  content: "Preparing detailed analysis...",
+                });
+
+                // If DM succeeds, send the analysis
+                await PredictionHandler.sendDetailedAnalysis(
+                  interaction,
+                  predictions,
+                  event,
+                  currentModel
+                );
+              } catch (dmError) {
+                console.error("DM Error:", dmError);
+                await interaction.editReply({
+                  content:
+                    "❌ Unable to send detailed analysis. Please make sure your DMs are open.",
+                  ephemeral: true,
+                });
+              }
+            } catch (error) {
+              console.error("Error handling analysis request:", error);
+              await interaction.editReply({
+                content: "Error generating analysis. Please try again.",
+                ephemeral: true,
+              });
+            }
           }
           break;
 
@@ -600,7 +607,6 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 function createHelpEmbed() {
-
   return new EmbedBuilder()
 
     .setColor("#0099ff")
@@ -610,89 +616,60 @@ function createHelpEmbed() {
     .setDescription("Welcome to Fight Genie! Here are the available commands:")
 
     .addFields(
-
       {
-
         name: "🌟 $buy",
 
         value:
-
           "```SPECIAL OFFER: Get lifetime access for $50!\nLimited launch price only!```",
-
       },
 
       {
-
         name: "📅 $upcoming",
 
         value:
-
           "```Show the next upcoming UFC event.\n\n• Subscribers can view predictions & analysis\n• Check data status via card dropdown menu```",
-
       },
 
       {
-
         name: "🤖 $model [claude/gpt]",
 
         value:
-
           "```Switch between Claude and GPT-4 for predictions\nDefault: GPT-4```",
-
       },
 
       {
-
         name: "📊 $stats",
 
         value:
-
           "```Compare prediction accuracy between Claude and GPT-4 models\nUpdated the following day after each event```",
-
       },
 
       {
-
         name: "👤 $checkstats [fighter name]",
 
         value:
-
           "```• View all fighter stats used for prediction analysis\n• Force update stats from ufcstats.com\n• Use when stats are outdated/missing via:\n  - Fight card\n  - Data status menu```",
-
       }
-
     )
 
     .setFooter({
-
       text: "Data from UFCStats.com | Powered by Claude & GPT-4 | Fight Genie",
 
       iconURL:
-
         "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",
-
     });
-
 }
 
-
-
 client.once("ready", () => {
-
   isClientReady = true;
 
   console.log(`Bot is ready as ${client.user.tag}`);
 
   console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
-
 });
 
-
-
 async function startup() {
-
   try {
-
     console.log("Initializing database...");
 
     await database.initializeDatabase();
@@ -700,8 +677,6 @@ async function startup() {
     await database.createPaymentTables();
 
     console.log("Database initialized");
-
-
 
     console.log("Starting bot...");
 
@@ -712,19 +687,13 @@ async function startup() {
     await new Promise((resolve) => client.once("ready", resolve));
 
     console.log("Bot startup complete");
-
   } catch (error) {
-
     console.error("Startup error:", error);
 
     process.exit(1);
-
   }
-
 }
 
 startup();
-
-
 
 module.exports = { client };
