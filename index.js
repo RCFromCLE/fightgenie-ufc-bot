@@ -44,7 +44,7 @@ const AdminLogger = require("./src/utils/AdminLogger");
 
 const COMMAND_PREFIX = "$";
 
-const ALLOWED_CHANNEL_ID = "1300201044730445864";
+// const ALLOWED_CHANNEL_ID = "1300201044730445864";
 
 const MAX_RETRIES = 3;
 
@@ -129,7 +129,7 @@ client.once("ready", async () => {
 
   console.log(`Bot is ready as ${client.user.tag}`);
 
-  console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
+  // console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
 
   // Log initial stats
 
@@ -147,7 +147,7 @@ client.on("messageCreate", async (message) => {
     console.error("Message received but client is not ready.");
     return;
   }
-  if (message.author.bot || message.channelId !== ALLOWED_CHANNEL_ID) return;
+  // if (message.author.bot || message.channelId !== ALLOWED_CHANNEL_ID) return;
   if (!message.content.startsWith(COMMAND_PREFIX)) return;
 
   console.log("Received command:", message.content);
@@ -665,7 +665,7 @@ client.once("ready", () => {
 
   console.log(`Bot is ready as ${client.user.tag}`);
 
-  console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
+  // console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
 });
 
 async function startup() {
