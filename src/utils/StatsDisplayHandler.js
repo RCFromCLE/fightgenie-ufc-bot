@@ -11,6 +11,10 @@ class StatsDisplayHandler {
     static async handleShowFighterStats(interaction) {
         try {
             await interaction.deferUpdate();
+
+            const currentEvent = await database.query(
+                `SELECT event_id FROM events WHERE Date >= date('now') ORDER BY Date ASC LIMIT 1`
+            );
             
             // Extract fighter name from the select value
             const selectedValue = interaction.values[0];
