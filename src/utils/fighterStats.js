@@ -60,94 +60,166 @@ class FighterStats {
             if (!fighterName || typeof fighterName !== 'string') {
                 throw new Error(`Invalid fighter name: ${fighterName}`);
             }
-
+    
             console.log(`\nSearching for fighter: ${fighterName}`);
             
-            // Clean the name and create search variations
-            const cleanName = fighterName.trim();
-            const nameParts = cleanName.split(/\s+/);
+            // Use the search URL directly with the last name
+            const searchUrl = `http://www.ufcstats.com/statistics/fighters/search?query=${encodeURIComponent(fighterName.split(' ')[1])}`;
+            console.log('Searching fighters page:', searchUrl);
+            const response = await axios.get(searchUrl);
+            const $ = cheerio.load(response.data);
             
-            if (nameParts.length === 0) {
-                throw new Error('No valid name parts found after cleaning');
-            }
-
-            // Try different search approaches
-            const searchMethods = [
-                // Exact name match
-                async () => {
-                    const url = `http://www.ufcstats.com/statistics/fighters?char=${nameParts[0][0].toUpperCase()}&page=all`;
-                    console.log('Trying exact match search:', url);
-                    const $ = await this.fetchAndLoad(url);
-                    return this.findExactMatch($, cleanName);
-                },
-                // Last name search
-                async () => {
-                    if (nameParts.length > 1) {
-                        const url = `http://www.ufcstats.com/statistics/fighters?char=${nameParts[nameParts.length - 1][0].toUpperCase()}&page=all`;
-                        console.log('Trying last name search:', url);
-                        const $ = await this.fetchAndLoad(url);
-                        return this.findLastNameMatch($, nameParts[nameParts.length - 1]);
-                    }
-                    return null;
-                },
-                // First name search
-                async () => {
-                    const url = `http://www.ufcstats.com/statistics/fighters?char=${nameParts[0][0].toUpperCase()}&page=all`;
-                    console.log('Trying first name search:', url);
-                    const $ = await this.fetchAndLoad(url);
-                    return this.findFirstNameMatch($, nameParts[0]);
+            // Look for exact match
+            let bestMatch = null;
+            let bestScore = 0;
+    
+            $("table.b-statistics__table tbody tr").each((_, row) => {
+                const firstName = $(row).find("td:nth-child(1)").text().trim();
+                const lastName = $(row).find("td:nth-child(2)").text().trim();
+                const fullName = `${firstName} ${lastName}`;
+                const fighterLink = $(row).find("td:nth-child(1) a").attr("href");
+    
+                if (!firstName || !lastName || !fighterLink) return;
+    
+                // Compare full names
+                const searchNameParts = fighterName.toLowerCase().split(' ');
+                const foundNameParts = fullName.toLowerCase().split(' ');
+    
+                // Check if first and last names match exactly
+                if (searchNameParts[0] === foundNameParts[0] && 
+                    searchNameParts[1] === foundNameParts[1]) {
+                    bestMatch = { fighterLink, foundName: fullName, matchType: "exact" };
+                    bestScore = 1;
+                    return false; // Break the loop
                 }
-            ];
-
-            // Try each search method in order
-            for (const searchMethod of searchMethods) {
-                try {
-                    const result = await searchMethod();
-                    if (result) {
-                        console.log('Found match:', result);
-                        return result;
-                    }
-                } catch (searchError) {
-                    console.error('Error in search method:', searchError);
-                    continue;
-                }
+            });
+    
+            if (bestMatch) {
+                console.log('Found match:', bestMatch);
+                return bestMatch;
             }
-
+    
             console.log(`No matches found for: ${fighterName}`);
             return null;
-
+    
         } catch (error) {
             console.error(`Error searching for fighter ${fighterName}:`, error);
             return null;
         }
     }
 
-    static async fetchAndLoad(url) {
-        try {
-            const response = await axios.get(url);
-            return cheerio.load(response.data);
-        } catch (error) {
-            console.error('Error fetching URL:', url, error);
-            throw error;
-        }
-    }
-
     static findExactMatch($, targetName) {
         let match = null;
+        const targetNameLower = targetName.toLowerCase();
+    
         $("table.b-statistics__table tbody tr").each((_, row) => {
             const firstName = $(row).find("td:nth-child(1)").text().trim();
             const lastName = $(row).find("td:nth-child(2)").text().trim();
             const fullName = `${firstName} ${lastName}`;
             const fighterLink = $(row).find("td:nth-child(1) a").attr("href");
-
-            if (fullName.toLowerCase() === targetName.toLowerCase() && fighterLink) {
+    
+            // Check for exact name match
+            if (fullName.toLowerCase() === targetNameLower && fighterLink) {
                 match = { fighterLink, foundName: fullName, matchType: "exact" };
                 return false; // break each loop
             }
         });
         return match;
     }
-
+    
+    static findLastNameMatch($, targetLastName, fullTargetName) {
+        let match = null;
+        const targetLastNameLower = targetLastName.toLowerCase();
+        const targetFirstName = fullTargetName.split(' ')[0].toLowerCase();
+        
+        $("table.b-statistics__table tbody tr").each((_, row) => {
+            const firstName = $(row).find("td:nth-child(1)").text().trim();
+            const lastName = $(row).find("td:nth-child(2)").text().trim();
+            const fighterLink = $(row).find("td:nth-child(1) a").attr("href");
+            
+            if (!lastName || !fighterLink) return;
+    
+            // Check both last name AND first name similarity
+            const lastNameSimilarity = this.calculateStringSimilarity(lastName.toLowerCase(), targetLastNameLower);
+            const firstNameSimilarity = this.calculateStringSimilarity(firstName.toLowerCase(), targetFirstName);
+            
+            // Require high similarity for both names
+            if (lastNameSimilarity > 0.8 && firstNameSimilarity > 0.7) {
+                const fullName = `${firstName} ${lastName}`;
+                match = { fighterLink, foundName: fullName, matchType: "lastName" };
+                return false; // Break the loop if we find a good match
+            }
+        });
+        return match;
+    }
+    
+    static findFirstNameMatch($, targetFirstName) {
+        let match = null;
+        const targetFirstNameLower = targetFirstName.toLowerCase();
+        let bestMatchScore = 0;
+    
+        $("table.b-statistics__table tbody tr").each((_, row) => {
+            const firstName = $(row).find("td:nth-child(1)").text().trim();
+            const lastName = $(row).find("td:nth-child(2)").text().trim();
+            const fighterLink = $(row).find("td:nth-child(1) a").attr("href");
+            
+            if (!firstName || !fighterLink) return;
+    
+            // Compare first names using string similarity
+            const similarity = this.calculateStringSimilarity(firstName.toLowerCase(), targetFirstNameLower);
+            
+            // Only consider matches with high similarity
+            if (similarity > 0.8 && similarity > bestMatchScore) {
+                const fullName = `${firstName} ${lastName}`;
+                // Verify this isn't a different fighter with similar first name
+                if (this.verifyFighterMatch(targetFirstName, firstName)) {
+                    bestMatchScore = similarity;
+                    match = { fighterLink, foundName: fullName, matchType: "firstName" };
+                }
+            }
+        });
+        return match;
+    }
+    
+    static verifyFighterMatch(targetName, foundName) {
+        // Remove special characters and convert to lowercase
+        const cleanTarget = targetName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const cleanFound = foundName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        // Check if the found name contains most of the target name characters
+        const commonChars = cleanTarget.split('').filter(char => cleanFound.includes(char));
+        const matchRatio = commonChars.length / cleanTarget.length;
+        
+        return matchRatio >= 0.8; // At least 80% of characters should match
+    }
+    
+    static calculateStringSimilarity(str1, str2) {
+        if (str1 === str2) return 1.0;
+        if (str1.length === 0 || str2.length === 0) return 0.0;
+        
+        const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
+        
+        for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+        for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+        
+        for (let j = 1; j <= str2.length; j++) {
+            for (let i = 1; i <= str1.length; i++) {
+                if (str1[i-1] === str2[j-1]) {
+                    matrix[j][i] = matrix[j-1][i-1];
+                } else {
+                    matrix[j][i] = Math.min(
+                        matrix[j-1][i-1] + 1,
+                        matrix[j][i-1] + 1,
+                        matrix[j-1][i] + 1
+                    );
+                }
+            }
+        }
+        
+        const maxLength = Math.max(str1.length, str2.length);
+        return 1 - (matrix[str2.length][str1.length] / maxLength);
+    }
+    
     static findLastNameMatch($, targetLastName) {
         let match = null;
         $("table.b-statistics__table tbody tr").each((_, row) => {
@@ -234,55 +306,50 @@ class FighterStats {
         }
     }
 
-    static async updateFighterStats(fighterName) {
-        try {
-            console.log(`\nUpdating stats for ${fighterName}`);
-            const stats = await this.scrapeFighterStats(fighterName);
-            
-            if (!stats) {
-                console.log(`No stats found for ${fighterName}`);
-                return null;
-            }
-
-            // Insert or update stats in database
-            await database.query(`
-                INSERT OR REPLACE INTO fighters (
-                    Name, Height, Weight, Reach, Stance, DOB,
-                    SLPM, SApM, StrAcc, StrDef, TDAvg,
-                    TDAcc, TDDef, SubAvg, last_updated
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            `, [
-                stats.Name,
-                stats.Height,
-                stats.Weight,
-                stats.Reach,
-                stats.Stance,
-                stats.DOB,
-                stats.SLPM,
-                stats.SApM,
-                stats.StrAcc,
-                stats.StrDef,
-                stats.TDAvg,
-                stats.TDAcc,
-                stats.TDDef,
-                stats.SubAvg
-            ]);
-
-            console.log(`Successfully updated database for ${stats.Name}`);
-
-            // Update cache
-            this.statsCache.set(fighterName, {
-                data: stats,
-                timestamp: Date.now()
-            });
-
-            return stats;
-
-        } catch (error) {
-            console.error(`Error updating stats for ${fighterName}:`, error);
+static async updateFighterStats(fighterName) {
+    try {
+        console.log(`\nUpdating stats for ${fighterName}`);
+        const stats = await this.scrapeFighterStats(fighterName);
+        
+        if (!stats) {
+            console.log(`No stats found for ${fighterName}`);
             return null;
         }
+
+        // Add current timestamp to stats
+        const currentTime = new Date().toISOString();
+
+        await database.query(`
+            INSERT OR REPLACE INTO fighters (
+                Name, Height, Weight, Reach, Stance, DOB,
+                SLPM, SApM, StrAcc, StrDef, TDAvg,
+                TDAcc, TDDef, SubAvg, last_updated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `, [
+            stats.Name,
+            stats.Height,
+            stats.Weight,
+            stats.Reach,
+            stats.Stance,
+            stats.DOB,
+            stats.SLPM,
+            stats.SApM,
+            stats.StrAcc,
+            stats.StrDef,
+            stats.TDAvg,
+            stats.TDAcc,
+            stats.TDDef,
+            stats.SubAvg
+        ]);
+
+        console.log(`Successfully updated database for ${stats.Name}`);
+        return { ...stats, last_updated: currentTime };
+
+    } catch (error) {
+        console.error(`Error updating stats for ${fighterName}:`, error);
+        return null;
     }
+}
 
     static async getFighterRecord(fighterName) {
         try {
