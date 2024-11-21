@@ -1,0 +1,26 @@
+{
+    "name": "ufc-prediction-bot",
+    "version": "1.0.0",
+    "description": "UFC fight prediction Discord bot",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js",
+        "init-db": "node init-db.js"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.18.0",
+        "@solana/web3.js": "^1.95.5",
+        "axios": "^1.7.7",
+        "axios-retry": "^4.5.0",
+        "cheerio": "^1.0.0",
+        "date-fns": "^4.1.0",
+        "discord.js": "^14.14.1",
+        "dotenv": "^16.4.5",
+        "openai": "^4.68.4",
+        "sqlite3": "^5.1.7"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.3"
+    }
+}
