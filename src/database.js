@@ -250,6 +250,145 @@ async initializeDatabase() {
       }
   }
 
+  async getModelComparisonStats() {
+    try {
+      const query = `
+          WITH model_performance AS (
+              SELECT 
+                  sp.model_used,
+                  COUNT(DISTINCT sp.event_id) as events_analyzed,
+                  COUNT(*) as total_predictions,
+                  ROUND(AVG(CASE WHEN json_extract(po.fight_outcomes, '$.correct') = 1 THEN 1 ELSE 0 END) * 100, 1) as fight_accuracy,
+                  ROUND(AVG(CASE WHEN json_extract(po.fight_outcomes, '$.methodCorrect') = 1 THEN 1 ELSE 0 END) * 100, 1) as method_accuracy,
+                  ROUND(AVG(po.confidence_accuracy), 1) as confidence_accuracy,
+                  ROUND(AVG(CASE WHEN json_extract(po.parlay_outcomes, '$.correct') = 1 THEN 1 ELSE 0 END) * 100, 1) as parlay_accuracy
+              FROM prediction_outcomes po
+              JOIN stored_predictions sp ON po.prediction_id = sp.prediction_id
+              GROUP BY sp.model_used
+          ),
+          model_rankings AS (
+              SELECT *,
+                  RANK() OVER (ORDER BY fight_accuracy DESC) as fight_rank,
+                  RANK() OVER (ORDER BY method_accuracy DESC) as method_rank,
+                  RANK() OVER (ORDER BY parlay_accuracy DESC) as parlay_rank
+              FROM model_performance
+          )
+          SELECT * FROM model_rankings`;
+
+      const stats = await this.query(query);
+      console.log('Retrieved model comparison stats:', stats);
+      return stats;
+    } catch (error) {
+      console.error('Error getting model comparison stats:', error);
+      return [];
+    }
+  }
+
+  async getHistoricalPredictions(eventId) {
+    try {
+      const query = `
+          SELECT 
+              sp.prediction_id,
+              sp.model_used,
+              sp.card_type,
+              sp.prediction_data,
+              po.fight_outcomes,
+              po.confidence_accuracy,
+              e.Event as event_name,
+              e.Date as event_date
+          FROM stored_predictions sp
+          JOIN events e ON sp.event_id = e.event_id
+          LEFT JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
+          WHERE sp.event_id = ?
+          ORDER BY sp.created_at DESC`;
+
+      const predictions = await this.query(query, [eventId]);
+      return predictions;
+    } catch (error) {
+      console.error('Error getting historical predictions:', error);
+      return [];
+    }
+  }
+
+  async getEventPredictionStats(eventId) {
+    try {
+      const query = `
+          SELECT 
+              sp.model_used,
+              COUNT(*) as total_fights,
+              SUM(CASE WHEN json_extract(po.fight_outcomes, '$.correct') = 1 THEN 1 ELSE 0 END) as correct_predictions,
+              ROUND(AVG(po.confidence_accuracy), 2) as avg_confidence,
+              COUNT(CASE WHEN json_extract(po.fight_outcomes, '$.methodCorrect') = 1 THEN 1 ELSE 0 END) as correct_methods
+          FROM stored_predictions sp
+          JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
+          WHERE sp.event_id = ?
+          GROUP BY sp.model_used`;
+
+      const stats = await this.query(query, [eventId]);
+      return stats;
+    } catch (error) {
+      console.error('Error getting event prediction stats:', error);
+      return [];
+    }
+  }
+
+  async getPredictionPerformanceOverTime(modelType = null) {
+    try {
+      const query = `
+          SELECT 
+              e.Date,
+              sp.model_used,
+              COUNT(*) as total_predictions,
+              ROUND(AVG(CASE WHEN json_extract(po.fight_outcomes, '$.correct') = 1 THEN 100 ELSE 0 END), 2) as accuracy,
+              ROUND(AVG(po.confidence_accuracy), 2) as confidence_accuracy
+          FROM stored_predictions sp
+          JOIN events e ON sp.event_id = e.event_id
+          JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
+          ${modelType ? 'WHERE sp.model_used = ?' : ''}
+          GROUP BY e.Date, sp.model_used
+          ORDER BY e.Date DESC
+          LIMIT 10`;
+
+      const params = modelType ? [modelType] : [];
+      const performance = await this.query(query, params);
+      return performance;
+    } catch (error) {
+      console.error('Error getting prediction performance:', error);
+      return [];
+    }
+  }
+
+  async getDetailedModelStats(modelType) {
+    try {
+      const query = `
+          WITH fight_details AS (
+              SELECT 
+                  sp.model_used,
+                  json_extract(po.fight_outcomes, '$.predictedMethod') as predicted_method,
+                  json_extract(po.fight_outcomes, '$.actualMethod') as actual_method,
+                  json_extract(po.fight_outcomes, '$.correct') as is_correct,
+                  json_extract(po.fight_outcomes, '$.confidence') as confidence
+              FROM stored_predictions sp
+              JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
+              WHERE sp.model_used = ?
+          )
+          SELECT 
+              model_used,
+              COUNT(*) as total_predictions,
+              ROUND(AVG(CASE WHEN is_correct = 1 THEN 100 ELSE 0 END), 2) as overall_accuracy,
+              ROUND(AVG(CASE WHEN predicted_method = actual_method THEN 100 ELSE 0 END), 2) as method_accuracy,
+              ROUND(AVG(confidence), 2) as avg_confidence
+          FROM fight_details
+          GROUP BY model_used`;
+
+      const stats = await this.query(query, [modelType]);
+      return stats;
+    } catch (error) {
+      console.error('Error getting detailed model stats:', error);
+      return [];
+    }
+  }
+
   async activateServerEventAccess(serverId, paymentId) {
       try {
           // Get the next event's date for expiration
@@ -381,31 +520,6 @@ async verifyAccess(serverId, eventId = null) {
   } catch (error) {
       console.error('Error verifying access:', error);
       return false;
-  }
-}
-
-async handlePaymentVerification(interaction) {
-  try {
-      // Payment verification logic
-      const paymentSuccess = true; // Assume payment is successful for this example
-
-      if (paymentSuccess) {
-          const serverId = interaction.guild.id;
-          const eventId = interaction.options.getString('event_id');
-
-          // Update subscription status in the database
-          const query = `
-              INSERT INTO subscriptions (server_id, event_id, active)
-              VALUES (?, ?, 1)
-              ON DUPLICATE KEY UPDATE active = 1
-          `;
-          const params = [serverId, eventId];
-          await database.execute(query, params);
-
-          console.log(`✅ Access granted for Server ID: ${serverId} for Event ID: ${eventId}`);
-      }
-  } catch (error) {
-      console.error('Error handling payment verification:', error);
   }
 }
 
@@ -1818,7 +1932,11 @@ async function calculateWinRate(fighterName) {
     console.error(`Error calculating win rate for ${fighterName}:`, error);
     return 0;
   }
+
+  
 }
+
+
 
 const database = new DatabaseManager();
 

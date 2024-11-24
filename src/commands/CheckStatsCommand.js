@@ -1,11 +1,18 @@
-const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const database = require('../database');
 const ModelCommand = require('./ModelCommand');
 const FighterStats = require('../utils/fighterStats');
+const DataValidator = require('../utils/DataValidator');
 
 class CheckStatsCommand {
     static async handleCheckStats(message, args) {
         try {
+            if (args.length === 0) {
+                // If no args, show model comparison stats
+                await this.showModelComparisonStats(message);
+                return;
+            }
+
             const fighter = args.join(" ");
             if (!fighter) {
                 await message.reply("Please provide a fighter name. Usage: $checkstats Fighter Name");
@@ -25,157 +32,192 @@ class CheckStatsCommand {
         }
     }
 
-    static async handleStatSelectInteraction(interaction) {
+    static async showModelComparisonStats(message) {
         try {
-            const selectedValue = interaction.values[0];
-            if (selectedValue === 'all_data_status') {
-                await EventHandlers.handleShowFighterDataStatus(interaction);
-                return;
-            }
+            const stats = await database.query(`
+                WITH model_performance AS (
+                    SELECT 
+                        sp.model_used,
+                        COUNT(DISTINCT sp.event_id) as events_analyzed,
+                        COUNT(*) as total_predictions,
+                        ROUND(AVG(CASE WHEN json_extract(po.fight_outcomes, '$.correct') = 1 THEN 1 ELSE 0 END) * 100, 1) as fight_accuracy,
+                        ROUND(AVG(CASE WHEN json_extract(po.fight_outcomes, '$.methodCorrect') = 1 THEN 1 ELSE 0 END) * 100, 1) as method_accuracy,
+                        ROUND(AVG(po.confidence_accuracy), 1) as confidence_accuracy,
+                        ROUND(AVG(CASE WHEN json_extract(po.parlay_outcomes, '$.correct') = 1 THEN 1 ELSE 0 END) * 100, 1) as parlay_accuracy
+                    FROM prediction_outcomes po
+                    JOIN stored_predictions sp ON po.prediction_id = sp.prediction_id
+                    GROUP BY sp.model_used
+                ),
+                model_rankings AS (
+                    SELECT *,
+                        RANK() OVER (ORDER BY fight_accuracy DESC) as fight_rank,
+                        RANK() OVER (ORDER BY method_accuracy DESC) as method_rank,
+                        RANK() OVER (ORDER BY parlay_accuracy DESC) as parlay_rank
+                    FROM model_performance
+                )
+                SELECT * FROM model_rankings
+            `);
 
-            const fighter = selectedValue.split(':')[1];
-            if (!fighter) {
-                await interaction.editReply('Invalid fighter selection.');
-                return;
-            }
+            const embed = new EmbedBuilder()
+                .setColor('#0099ff')
+                .setTitle('🤖 Fight Genie Model Performance')
+                .setDescription([
+                    'Compare how GPT-4 and Claude perform head-to-head in UFC predictions.',
+                    'Data from verified fight outcomes and predictions.',
+                    '',
+                    '━━━━━━━━━━━━━━━━━━━━━━'
+                ].join('\n'))
+                .setThumbnail("attachment://FightGenie_Logo_1.PNG");
 
-            const embed = await this.createStatsEmbed(fighter);
-            if (embed.error) {
-                await interaction.editReply({ content: embed.error });
-                return;
-            }
-
-            await interaction.editReply(embed);
-        } catch (error) {
-            console.error('Error handling stats selection:', error);
-            await interaction.editReply({ 
-                content: 'Error retrieving fighter statistics.', 
-                ephemeral: true 
+            stats.forEach(stat => {
+                const modelName = stat.model_used === 'gpt' ? 'GPT-4' : 'Claude';
+                const emoji = stat.model_used === 'gpt' ? '🧠' : '🤖';
+                
+                embed.addFields({
+                    name: `${emoji} ${modelName} Performance`,
+                    value: [
+                        `Events Analyzed: ${stat.events_analyzed}`,
+                        `Fight Accuracy: ${stat.fight_accuracy}%`,
+                        `Method Accuracy: ${stat.method_accuracy}%`, 
+                        `Parlay Success: ${stat.parlay_accuracy}%`,
+                        `Confidence Score: ${stat.confidence_accuracy}%`,
+                        '',
+                        `Win Rate: ${((stat.fight_accuracy || 0)).toFixed(1)}%`
+                    ].join('\n'),
+                    inline: true
+                });
             });
+
+            // Get historical events for dropdown
+            const events = await database.query(`
+                SELECT DISTINCT 
+                    e.event_id,
+                    e.Event as event_name,
+                    e.Date as event_date,
+                    COUNT(DISTINCT sp.model_used) as models_used
+                FROM events e
+                JOIN stored_predictions sp ON e.event_id = sp.event_id
+                JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
+                WHERE e.Date < datetime('now')
+                GROUP BY e.event_id
+                ORDER BY e.Date DESC
+                LIMIT 25
+            `);
+
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId('view_historical_predictions')
+                .setPlaceholder('View Historical Event Predictions')
+                .addOptions(
+                    events.map(event => ({
+                        label: event.event_name,
+                        description: `${new Date(event.event_date).toLocaleDateString()} - ${event.models_used} models`,
+                        value: `event_${event.event_id}`,
+                        emoji: '📊'
+                    }))
+                );
+
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+
+            await message.reply({
+                embeds: [embed],
+                components: [row],
+                files: [{
+                    attachment: './src/images/FightGenie_Logo_1.PNG',
+                    name: 'FightGenie_Logo_1.PNG'
+                }]
+            });
+
+        } catch (error) {
+            console.error('Error showing model stats:', error);
+            await message.reply('Error retrieving model statistics.');
         }
     }
 
-    static async createStatsEmbed(fighter) {
+    static async createStatsEmbed(fighterName) {
         try {
-            const [stats, currentEvent] = await Promise.all([
-                database.query(
-                    "SELECT *, datetime(last_updated) as updated_at FROM fighters WHERE Name = ?",
-                    [fighter]
-                ),
-                database.query(
-                    `SELECT event_id FROM events WHERE Date >= date('now') ORDER BY Date ASC LIMIT 1`
-                )
-            ]);
+            const stats = await FighterStats.getFighterStats(fighterName);
+            const validation = await DataValidator.validateFighterStats(fighterName);
 
-            if (!stats || stats.length === 0) {
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`scrape_stats_${fighter}`)
-                            .setLabel('Search & Add Fighter')
-                            .setEmoji('🔎')
-                            .setStyle(ButtonStyle.Success)
-                    );
-
-                return {
-                    content: `No stats found in database for "${fighter}". Would you like to search for and add this fighter?`,
-                    components: [row]
-                };
-            }
-
-            const stat = stats[0];
-            let lastUpdatedText = this.formatLastUpdated(stat.updated_at);
-            const fights = await database.query(`
-                SELECT COUNT(*) as count
-                FROM events 
-                WHERE Winner = ? OR Loser = ?
-            `, [fighter, fighter]);
-            
             const embed = new EmbedBuilder()
                 .setColor('#0099ff')
-                .setTitle(`Fighter Stats Database Check`)
-                .setDescription(`Stats for ${fighter}\nUFC Fights: ${fights[0]?.count || 0}\nLast Updated: ${lastUpdatedText}`)                
-                .addFields(
-                    {
-                        name: '📏 Physical Stats',
-                        value: [
-                            `Height: ${stat.Height || 'N/A'}`,
-                            `Weight: ${stat.Weight || 'N/A'}`,
-                            `Reach: ${stat.Reach || 'N/A'}`,
-                            `Stance: ${stat.Stance || 'N/A'}`
-                        ].join('\n'),
-                        inline: true
-                    },
-                    {
-                        name: '👊 Striking Stats',
-                        value: [
-                            `Strikes Landed per Min: ${stat.SLPM?.toFixed(2) || 'N/A'}`,
-                            `Strikes Absorbed per Min: ${stat.SApM?.toFixed(2) || 'N/A'}`,
-                            `Strike Accuracy: ${stat.StrAcc || 'N/A'}`,
-                            `Strike Defense: ${stat.StrDef || 'N/A'}`
-                        ].join('\n'),
-                        inline: true
-                    },
-                    {
-                        name: '🤼 Grappling Stats',
-                        value: [
-                            `Takedowns Avg: ${stat.TDAvg?.toFixed(2) || 'N/A'}/15min`,
-                            `Takedown Accuracy: ${stat.TDAcc || 'N/A'}`,
-                            `Takedown Defense: ${stat.TDDef || 'N/A'}`,
-                            `Submission Avg: ${stat.SubAvg?.toFixed(2) || 'N/A'}/15min`
-                        ].join('\n'),
-                        inline: true
-                    }
-                )
-                .setFooter({
-                    text: `Current Model: ${ModelCommand.getCurrentModel().toUpperCase()} | Stats from UFCStats.com`,
-                    iconURL: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png'
-                });const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`update_stats_${fighter}`)
-                        .setLabel('Update Fighter Stats')
-                        .setEmoji('🔄')
-                        .setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder()
-                        .setCustomId('show_event')
-                        .setLabel('Back to Event')
-                        .setEmoji('↩️')
-                        .setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder()
-                        .setCustomId(`predict_main_${ModelCommand.getCurrentModel()}_${currentEvent[0]?.event_id || 'latest'}`)
-                        .setLabel('Back to Predictions')
-                        .setEmoji('📊')
-                        .setStyle(ButtonStyle.Secondary)
+                .setTitle(`👤 ${fighterName} Statistics`)
+                .setDescription(validation.hasData ? 
+                    `Last Updated: ${validation.lastUpdate ? new Date(validation.lastUpdate).toLocaleString() : 'Never'}` :
+                    '❌ No stats found in database'
                 );
 
-            return { 
+            if (stats) {
+                // Physical stats
+                embed.addFields({
+                    name: '📏 Physical Stats',
+                    value: [
+                        `Height: ${stats.Height || 'N/A'}`,
+                        `Weight: ${stats.Weight || 'N/A'}`,
+                        `Reach: ${stats.Reach || 'N/A'}`,
+                        `Stance: ${stats.Stance || 'N/A'}`
+                    ].join('\n'),
+                    inline: true
+                });
+
+                // Career stats
+                if (validation.record) {
+                    embed.addFields({
+                        name: '📊 Career Record',
+                        value: [
+                            `Record: ${validation.record.wins}-${validation.record.losses}-${validation.record.draws}`,
+                            `Total Fights: ${validation.fightCount}`,
+                            `Win Rate: ${((validation.record.wins / (validation.fightCount || 1)) * 100).toFixed(1)}%`
+                        ].join('\n'),
+                        inline: true
+                    });
+                }
+
+                // Strike stats
+                embed.addFields({
+                    name: '👊 Strike Stats',
+                    value: [
+                        `Strikes Landed/Min: ${stats.SLPM?.toFixed(2) || '0.00'}`,
+                        `Strikes Absorbed/Min: ${stats.SApM?.toFixed(2) || '0.00'}`,
+                        `Strike Accuracy: ${stats.StrAcc || '0%'}`,
+                        `Strike Defense: ${stats.StrDef || '0%'}`
+                    ].join('\n'),
+                    inline: false
+                });
+
+                // Grappling stats
+                embed.addFields({
+                    name: '🤼 Grappling Stats',
+                    value: [
+                        `Takedowns/15min: ${stats.TDAvg?.toFixed(2) || '0.00'}`,
+                        `Takedown Accuracy: ${stats.TDAcc || '0%'}`,
+                        `Takedown Defense: ${stats.TDDef || '0%'}`,
+                        `Submissions/15min: ${stats.SubAvg?.toFixed(2) || '0.00'}`
+                    ].join('\n'),
+                    inline: false
+                });
+            }
+
+            // Create update button
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`update_stats_${fighterName}`)
+                        .setLabel('Update Stats')
+                        .setEmoji('🔄')
+                        .setStyle(ButtonStyle.Primary)
+                );
+
+            return {
                 embeds: [embed],
                 components: [row]
             };
-        } catch (error) {
-            console.error('Error creating stats embed:', error);
-            return { error: 'Error retrieving fighter statistics.' };
-        }
-    }
 
-    static formatLastUpdated(timestamp) {
-        if (!timestamp) return 'Never';
-        
-        const updateDate = new Date(timestamp);
-        const now = new Date();
-        const diffSeconds = Math.floor((now - updateDate) / 1000);
-        
-        if (diffSeconds < 60) {
-            return 'Just now';
-        } else if (diffSeconds < 3600) {
-            const minutes = Math.floor(diffSeconds / 60);
-            return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-        } else if (diffSeconds < 86400) {
-            const hours = Math.floor(diffSeconds / 3600);
-            return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+        } catch (error) {
+            console.error(`Error creating stats embed for ${fighterName}:`, error);
+            return {
+                error: 'Error retrieving fighter statistics. Please try again.'
+            };
         }
-        return updateDate.toLocaleString();
     }
 
     static async handleStatsButton(interaction, fighterName) {
@@ -187,13 +229,14 @@ class CheckStatsCommand {
             const loadingEmbed = new EmbedBuilder()
                 .setColor('#ffff00')
                 .setTitle('🔄 Updating Fighter Stats')
-                .setDescription(`Fetching latest stats for ${fighterName}...\nPlease wait while we update the database.`);
+                .setDescription(`Fetching latest stats for ${fighterName}...`);
     
             await interaction.editReply({
                 embeds: [loadingEmbed],
                 components: []
             });
     
+            // Update the stats
             const updatedStats = await FighterStats.updateFighterStats(fighterName);
             if (!updatedStats) {
                 await interaction.editReply({
@@ -203,10 +246,96 @@ class CheckStatsCommand {
                 });
                 return;
             }
-
-            const embed = await this.createStatsEmbed(fighterName);
-            await interaction.editReply(embed);
-
+    
+            // Get the record from database - properly destructure results
+            const [winsResult, lossesResult, drawsResult] = await Promise.all([
+                database.query(
+                    "SELECT COUNT(*) as count FROM events WHERE Winner = ?",
+                    [fighterName]
+                ),
+                database.query(
+                    "SELECT COUNT(*) as count FROM events WHERE Loser = ?",
+                    [fighterName]
+                ),
+                database.query(
+                    'SELECT COUNT(*) as count FROM events WHERE (Winner = ? OR Loser = ?) AND Method LIKE "%Draw%"',
+                    [fighterName, fighterName]
+                )
+            ]);
+    
+            const wins = winsResult[0]?.count || 0;
+            const losses = lossesResult[0]?.count || 0;
+            const draws = drawsResult[0]?.count || 0;
+    
+            const record = `${wins}-${losses}-${draws}`;
+            const totalFights = wins + losses + draws;
+            const winRate = totalFights > 0 ? ((wins / totalFights) * 100) : 0;
+    
+            const statsEmbed = new EmbedBuilder()
+                .setColor('#0099ff')
+                .setTitle(`👤 ${fighterName} Statistics`)
+                .setDescription(`Last Updated: ${new Date().toLocaleString()}`)
+                .addFields(
+                    {
+                        name: '📏 Physical Stats',
+                        value: [
+                            `Height: ${updatedStats.Height || 'N/A'}`,
+                            `Weight: ${updatedStats.Weight || 'N/A'}`,
+                            `Reach: ${updatedStats.Reach || 'N/A'}`,
+                            `Stance: ${updatedStats.Stance || 'N/A'}`
+                        ].join('\n'),
+                        inline: true
+                    },
+                    {
+                        name: '📊 Career Record',
+                        value: [
+                            `Record: ${record}`,
+                            `Total Fights: ${totalFights}`,
+                            `Win Rate: ${winRate.toFixed(1)}%`
+                        ].join('\n'),
+                        inline: true
+                    },
+                    {
+                        name: '👊 Strike Stats',
+                        value: [
+                            `Strikes Landed/Min: ${updatedStats.SLPM?.toFixed(2) || '0.00'}`,
+                            `Strikes Absorbed/Min: ${updatedStats.SApM?.toFixed(2) || '0.00'}`,
+                            `Strike Accuracy: ${updatedStats.StrAcc || '0%'}`,
+                            `Strike Defense: ${updatedStats.StrDef || '0%'}`
+                        ].join('\n'),
+                        inline: false
+                    },
+                    {
+                        name: '🤼 Grappling Stats',
+                        value: [
+                            `Takedowns/15min: ${updatedStats.TDAvg?.toFixed(2) || '0.00'}`,
+                            `Takedown Accuracy: ${updatedStats.TDAcc || '0%'}`,
+                            `Takedown Defense: ${updatedStats.TDDef || '0%'}`,
+                            `Submissions/15min: ${updatedStats.SubAvg?.toFixed(2) || '0.00'}`
+                        ].join('\n'),
+                        inline: false
+                    }
+                );
+    
+            const buttonRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`update_stats_${fighterName}`)
+                        .setLabel('Update Stats')
+                        .setEmoji('🔄')
+                        .setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder()
+                        .setCustomId('show_event')
+                        .setLabel('Back to Event')
+                        .setEmoji('↩️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+    
+            await interaction.editReply({
+                embeds: [statsEmbed],
+                components: [buttonRow]
+            });
+    
         } catch (error) {
             console.error('Error updating fighter stats:', error);
             await interaction.followUp({
@@ -214,8 +343,9 @@ class CheckStatsCommand {
                 ephemeral: true
             });
         }
+    
     }
-
+        
     static async handleScrapeButton(interaction, fighterName) {
         try {
             if (!interaction.deferred && !interaction.replied) {
