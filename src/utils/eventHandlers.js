@@ -487,13 +487,13 @@ async getCurrentEvent() {
             [event.Event]
         );
 
-        const eventTime = eventDetails[0]?.event_time || "3 AM ET";
+        const eventTime = eventDetails[0]?.event_time || "3 PM PST";
         const eventDate = new Date(eventDetails[0]?.Date);
 
         // Create base embed
         const embed = new EmbedBuilder()
             .setColor("#0099ff")
-            .setTitle(`🥊 UFC Fight Night: ${mainCard[0]?.fighter1 || ''} vs. ${mainCard[0]?.fighter2 || ''}`)
+            .setTitle(`🥊 UFC 310: ${mainCard[0]?.fighter1 || ''} vs. ${mainCard[0]?.fighter2 || ''}`)
             .setDescription([
                 `📅 ${eventDate.toLocaleString('en-US', { 
                     month: 'long',
@@ -1294,150 +1294,230 @@ static async createBaseEmbed(event) {
     }
   }
 
-  static formatBettingContent(content) {
-    if (!content) return 'None available';
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-        return content.map(item => {
-            if (typeof item === 'string') return `• ${item}`;
-            if (typeof item === 'object') {
-                if (item.prediction && item.reasoning) {
-                    return `• ${item.prediction}\n  └ ${item.reasoning}`;
-                }
-                if (item.combination) {
-                    return `• ${item.combination.join(" + ")}\n  └ ${item.reasoning}`;
-                }
-                if (item.opportunity) {
-                    return `• ${item.opportunity}\n  └ ${item.reasoning}`;
-                }
-                return Object.entries(item)
-                    .map(([key, val]) => `• ${key}: ${val}`)
-                    .join('\n');
-            }
-            return `• ${JSON.stringify(item)}`;
-        }).join('\n');
+  static async formatBettingSection(title, picks, showParlays = true) {
+    const mainText = picks
+        .map(pick => `🔒 ${pick.fighter} (${pick.odds}) by ${pick.method}\n└ ${pick.confidence}% confidence`)
+        .join('\n\n');
+
+    let parlayText = '';
+    if (showParlays && picks.length >= 2) {
+        parlayText = '\n\n**Two-Fight Parlay:**\n' +
+            `└ ${picks.slice(0, 2).map(p => `${p.fighter} (${p.odds})`).join(' + ')}\n` +
+            `  ⚡ Combined confidence: ${((picks[0].confidence + picks[1].confidence) / 2).toFixed(1)}%`;
+
+        if (picks.length >= 3) {
+            parlayText += '\n\n**Three-Fight Parlay:**\n' +
+                `└ ${picks.slice(0, 3).map(p => `${p.fighter} (${p.odds})`).join(' + ')}\n` +
+                `  ⚡ Combined confidence: ${(picks.slice(0, 3).reduce((acc, p) => acc + p.confidence, 0) / 3).toFixed(1)}%`;
+        }
     }
-    if (typeof content === 'object') {
-        return Object.entries(content)
-            .map(([key, val]) => `• ${key}: ${val}`)
-            .join('\n');
-    }
-    return String(content);
+
+    return mainText + parlayText;
 }
 
 static async displayBettingAnalysis(interaction, eventId) {
-    try {
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferUpdate();
-        }
+  try {
+      const event = await this.getUpcomingEvent();
+      if (!event) throw new Error('No upcoming event found');
 
-        const event = await database.getCurrentEvent() || await database.getUpcomingEvent();
-        if (!event) {
-            await interaction.editReply({
-                content: "No upcoming events found.",
-                ephemeral: true,
-            });
-            return;
-        }
+      const currentModel = ModelCommand.getCurrentModel();
+      const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
+      const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
 
-        const currentModel = ModelCommand.getCurrentModel();
-        const predictions = await database.query(
-            `SELECT prediction_data
-             FROM stored_predictions
-             WHERE event_id = ?
-             AND card_type = 'main'
-             AND model_used = ?
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [event.event_id, currentModel]
-        );
+      // Get stored predictions with explicit card type
+      const [mainCardPredictions, prelimPredictions] = await Promise.all([
+          database.query(`
+              SELECT prediction_data 
+              FROM stored_predictions 
+              WHERE event_id = ? AND card_type = 'main' AND model_used = ?
+              ORDER BY created_at DESC LIMIT 1
+          `, [event.event_id, currentModel]),
+          database.query(`
+              SELECT prediction_data 
+              FROM stored_predictions 
+              WHERE event_id = ? AND card_type = 'prelims' AND model_used = ?
+              ORDER BY created_at DESC LIMIT 1
+          `, [event.event_id, currentModel])
+      ]);
 
-        if (!predictions || !predictions.length) {
-            await interaction.editReply({
-                content: "No predictions found. Please generate predictions first.",
-                ephemeral: true,
-            });
-            return;
-        }
+      // Create base embed
+      const embed = new EmbedBuilder()
+          .setColor("#ffd700")
+          .setTitle(`💎 UFC ${event.Event} Betting Analysis`)
+          .setDescription(`Analysis powered by ${modelName} ${modelEmoji}\n\n━━━━━━━━━━━━━━━━━━━━━━`);
 
-        const predictionData = JSON.parse(predictions[0].prediction_data);
-        console.log("Retrieved prediction data:", predictionData);
+      // Process main card picks
+      if (mainCardPredictions?.[0]?.prediction_data) {
+          const mainData = JSON.parse(mainCardPredictions[0].prediction_data);
+          const mainLocks = mainData.fights
+              .filter(f => f.confidence >= 70)
+              .sort((a, b) => b.confidence - a.confidence);
 
-        if (!predictionData?.betting_analysis) {
-            await interaction.editReply({
-                content: "No betting analysis available. Please generate new predictions.",
-                ephemeral: true,
-            });
-            return;
-        }
+          if (mainLocks.length > 0) {
+              embed.addFields({
+                  name: '🎯 MAIN CARD HIGH CONFIDENCE',
+                  value: mainLocks.map(pick => 
+                      `🔒 ${pick.predictedWinner} by ${pick.method}\n└ ${pick.confidence}% confidence`
+                  ).join('\n\n') + '\n\n━━━━━━━━━━━━━━━━━━━━━━',
+                  inline: false
+              });
 
-        const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
-        const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
+              if (mainLocks.length >= 2) {
+                  const parlayText = [
+                      '**Two-Fight Main Card Parlay:**',
+                      `└ ${mainLocks.slice(0, 2).map(p => p.predictedWinner).join(' + ')}`,
+                      `  ⚡ Combined confidence: ${((mainLocks[0].confidence + mainLocks[1].confidence) / 2).toFixed(1)}%`
+                  ].join('\n');
 
-        const bettingEmbed = new EmbedBuilder()
-        .setColor("#ffd700")
-        .setTitle(`💰 Betting Analysis ${modelEmoji}`)
-        .setDescription(
-            `Betting Opportunities for ${event.Event}\n\n*Analysis generated by ${modelName}*`
-        )
-        .setThumbnail("attachment://FightGenie_Logo_1.PNG")
-        .setFooter({
-            text: `${modelName} Analysis • Fight Genie 1.0 • Stats from UFCStats.com`,
-            iconURL: "attachment://FightGenie_Logo_1.PNG"
-        });
+                  embed.addFields({
+                      name: '🎯 MAIN CARD PARLAYS',
+                      value: parlayText + '\n\n━━━━━━━━━━━━━━━━━━━━━━',
+                      inline: false
+                  });
+              }
+          }
+      }
 
-        // Add each section if it exists
-        const sections = {
-            "🎲 Parlay Recommendations": predictionData.betting_analysis.parlays,
-            "💰 Value Parlays": predictionData.betting_analysis.value_parlays,
-            "👊 Method Props": predictionData.betting_analysis.method_props,
-            "⏱️ Round Props": predictionData.betting_analysis.round_props,
-            "🎯 Special Props": predictionData.betting_analysis.special_props,
-            "⚠️ Potential Upsets": predictionData.betting_analysis.upsets,
-        };
+      // Process prelim picks
+      if (prelimPredictions?.[0]?.prediction_data) {
+          const prelimData = JSON.parse(prelimPredictions[0].prediction_data);
+          const prelimLocks = prelimData.fights
+              .filter(f => f.confidence >= 70)
+              .sort((a, b) => b.confidence - a.confidence);
 
-        Object.entries(sections).forEach(([name, content]) => {
-            if (content) {
-                const formattedContent = this.formatBettingContent(content);
-                if (formattedContent && formattedContent !== 'None available') {
-                    bettingEmbed.addFields({ 
-                        name, 
-                        value: formattedContent, 
-                        inline: false 
-                    });
-                }
-            }
-        });
+          if (prelimLocks.length > 0) {
+              embed.addFields({
+                  name: '🥊 PRELIM CARD HIGH CONFIDENCE',
+                  value: prelimLocks.map(pick => 
+                      `🔒 ${pick.predictedWinner} by ${pick.method}\n└ ${pick.confidence}% confidence`
+                  ).join('\n\n') + '\n\n━━━━━━━━━━━━━━━━━━━━━━',
+                  inline: false
+              });
 
-        const navigationRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`predict_main_${currentModel}_${event.event_id}`)
-                .setLabel("Back to Predictions")
-                .setEmoji("📊")
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId(`show_event_${event.event_id}`)
-                .setLabel("Back to Event")
-                .setEmoji("↩️")
-                .setStyle(ButtonStyle.Success)
-        );
+              if (prelimLocks.length >= 2) {
+                  const parlayTexts = [];
+                  
+                  parlayTexts.push(
+                      '**Two-Fight Prelim Parlay:**',
+                      `└ ${prelimLocks.slice(0, 2).map(p => p.predictedWinner).join(' + ')}`,
+                      `  ⚡ Combined confidence: ${((prelimLocks[0].confidence + prelimLocks[1].confidence) / 2).toFixed(1)}%`
+                  );
 
-await interaction.editReply({
-    embeds: [bettingEmbed],
-    components: [navigationRow],
-    files: [{
-        attachment: './src/images/FightGenie_Logo_1.PNG',
-        name: 'FightGenie_Logo_1.PNG'
-    }]
-});
+                  if (prelimLocks.length >= 3) {
+                      parlayTexts.push(
+                          '',
+                          '**Three-Fight Prelim Parlay:**',
+                          `└ ${prelimLocks.slice(0, 3).map(p => p.predictedWinner).join(' + ')}`,
+                          `  ⚡ Combined confidence: ${(prelimLocks.slice(0, 3).reduce((acc, p) => acc + p.confidence, 0) / 3).toFixed(1)}%`
+                      );
+                  }
 
-} catch (error) {
-        console.error("Error displaying betting analysis:", error);
-        await interaction.editReply({
-            content: "Error displaying betting analysis. Please try again.",
-            ephemeral: true,
-        });
-    }
+                  embed.addFields({
+                      name: '🥊 PRELIM CARD PARLAYS',
+                      value: parlayTexts.join('\n') + '\n\n━━━━━━━━━━━━━━━━━━━━━━',
+                      inline: false
+                  });
+              }
+          }
+
+          // Create combined cross-card parlays
+          if (mainCardPredictions?.[0]?.prediction_data && prelimLocks.length > 0) {
+              const mainData = JSON.parse(mainCardPredictions[0].prediction_data);
+              const allLocks = [
+                  ...mainData.fights.filter(f => f.confidence >= 70),
+                  ...prelimLocks
+              ].sort((a, b) => b.confidence - a.confidence);
+
+              if (allLocks.length >= 3) {
+                  const crossCardTexts = [
+                      '**Three-Fight Cross-Card Parlay:**',
+                      `└ ${allLocks.slice(0, 3).map(p => p.predictedWinner).join(' + ')}`,
+                      `  ⚡ Combined confidence: ${(allLocks.slice(0, 3).reduce((acc, p) => acc + p.confidence, 0) / 3).toFixed(1)}%`,
+                  ];
+
+                  if (allLocks.length >= 5) {
+                      crossCardTexts.push(
+                          '',
+                          '**Five-Fight Power Parlay:**',
+                          `└ ${allLocks.slice(0, 5).map(p => p.predictedWinner).join(' + ')}`,
+                          `  ⚡ Combined confidence: ${(allLocks.slice(0, 5).reduce((acc, p) => acc + p.confidence, 0) / 5).toFixed(1)}%`
+                      );
+                  }
+
+                  if (allLocks.length >= 7) {
+                      crossCardTexts.push(
+                          '',
+                          '**Seven-Fight Maximum Value Parlay:**',
+                          `└ ${allLocks.slice(0, 7).map(p => p.predictedWinner).join(' + ')}`,
+                          `  ⚡ Combined confidence: ${(allLocks.slice(0, 7).reduce((acc, p) => acc + p.confidence, 0) / 7).toFixed(1)}%`
+                      );
+                  }
+
+                  embed.addFields({
+                      name: '💫 PREMIUM CROSS-CARD PARLAYS',
+                      value: crossCardTexts.join('\n') + '\n\n━━━━━━━━━━━━━━━━━━━━━━',
+                      inline: false
+                  });
+              }
+          }
+      }
+
+      // Process underdogs across both cards
+      const underdogs = [
+          ...(mainCardPredictions?.[0]?.prediction_data ? JSON.parse(mainCardPredictions[0].prediction_data).fights : []),
+          ...(prelimPredictions?.[0]?.prediction_data ? JSON.parse(prelimPredictions[0].prediction_data).fights : [])
+      ].filter(fight => 
+          fight.confidence >= 65 && 
+          fight.moneylineOdds && 
+          parseInt(fight.moneylineOdds) > 0
+      ).sort((a, b) => b.confidence - a.confidence);
+
+      if (underdogs.length > 0) {
+          embed.addFields({
+              name: '💰 UNDERDOG VALUE PICKS',
+              value: underdogs.map(pick => 
+                  `🎯 ${pick.predictedWinner} (${pick.moneylineOdds}) by ${pick.method}\n└ ${pick.confidence}% confidence [${pick.isMainCard ? 'Main Card' : 'Prelims'}]`
+              ).join('\n\n'),
+              inline: false
+          });
+      }
+
+      // Add model footer
+      embed.setFooter({
+          text: `Odds via FanDuel • ${modelName} Analysis`,
+          iconURL: 'attachment://FightGenie_Logo_1.PNG'
+      });
+
+      const navigationRow = new ActionRowBuilder()
+          .addComponents(
+              new ButtonBuilder()
+                  .setCustomId(`predict_main_${currentModel}_${event.event_id}`)
+                  .setLabel("Back to Predictions")
+                  .setEmoji("📊")
+                  .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                  .setCustomId(`show_event_${event.event_id}`)
+                  .setLabel("Back to Event")
+                  .setEmoji("↩️")
+                  .setStyle(ButtonStyle.Success)
+          );
+
+      await interaction.editReply({
+          embeds: [embed],
+          components: [navigationRow],
+          files: [{
+              attachment: './src/images/FightGenie_Logo_1.PNG',
+              name: 'FightGenie_Logo_1.PNG'
+          }]
+      });
+
+  } catch (error) {
+      console.error("Error displaying betting analysis:", error);
+      await interaction.editReply({
+          content: "Error generating betting analysis. Please try again.",
+          ephemeral: true
+      });
+  }
 }
 }
 

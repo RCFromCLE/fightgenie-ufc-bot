@@ -13,7 +13,59 @@ class OddsAnalysis {
     ODDS: "/v4/sports/mma_mixed_martial_arts/odds",
   };
 
-// In OddsAnalysis.js, update the handleOddsCommand method:
+// Updated method to get odds (checks cache first)
+static async getFightOddsWithCache(fight, eventId) {
+  try {
+      // Check cache first
+      const cachedOdds = await database.query(`
+          SELECT * FROM fight_odds 
+          WHERE event_id = ? 
+          AND ((fighter1 = ? AND fighter2 = ?) OR (fighter1 = ? AND fighter2 = ?))
+          AND last_updated > datetime('now', '-1 hour')
+          ORDER BY last_updated DESC LIMIT 1
+      `, [eventId, fight.fighter1, fight.fighter2, fight.fighter2, fight.fighter1]);
+
+      if (cachedOdds?.[0]) {
+          return {
+              fighter1: {
+                  name: fight.fighter1,
+                  price: cachedOdds[0].fighter1_odds
+              },
+              fighter2: {
+                  name: fight.fighter2,
+                  price: cachedOdds[0].fighter2_odds
+              },
+              lastUpdate: cachedOdds[0].last_updated
+          };
+      }
+
+      // If no valid cache, fetch fresh odds
+      const oddsData = await this.fetchUFCOdds();
+      if (!oddsData) return null;
+
+      const freshOdds = this.getFightOdds(fight, oddsData, 'fanduel');
+      if (freshOdds) {
+          // Cache the fresh odds
+          await database.query(`
+              INSERT OR REPLACE INTO fight_odds (
+                  event_id, fighter1, fighter2, fighter1_odds, fighter2_odds, bookmaker
+              ) VALUES (?, ?, ?, ?, ?, ?)
+          `, [
+              eventId,
+              fight.fighter1,
+              fight.fighter2,
+              freshOdds.fighter1.price,
+              freshOdds.fighter2.price,
+              'fanduel'
+          ]);
+      }
+
+      return freshOdds;
+  } catch (error) {
+      console.error('Error getting fight odds:', error);
+      return null;
+  }
+}
 
 static async handleOddsCommand(interaction, model, eventId, bookmaker = 'fanduel', cardType = 'main') {
     try {
@@ -208,6 +260,37 @@ static async handleOddsCommand(interaction, model, eventId, bookmaker = 'fanduel
       .filter(Boolean)
       .join("\n");
   }
+
+  static async cacheEventOdds(eventId, fights) {
+    try {
+        const oddsData = await this.fetchUFCOdds();
+        if (!oddsData) return null;
+
+        // Store each fight's odds
+        await Promise.all(fights.map(async fight => {
+            const odds = this.getFightOdds(fight, oddsData, 'fanduel');
+            if (!odds?.fighter1 || !odds?.fighter2) return;
+
+            await database.query(`
+                INSERT OR REPLACE INTO fight_odds (
+                    event_id, fighter1, fighter2, fighter1_odds, fighter2_odds, bookmaker
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            `, [
+                eventId,
+                fight.fighter1,
+                fight.fighter2,
+                odds.fighter1.price,
+                odds.fighter2.price,
+                'fanduel'
+            ]);
+        }));
+
+        return true;
+    } catch (error) {
+        console.error('Error caching odds:', error);
+        return null;
+    }
+}
 
   static formatAmericanOdds(odds) {
     return odds > 0 ? `+${odds}` : odds.toString();

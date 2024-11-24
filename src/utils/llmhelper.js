@@ -563,82 +563,121 @@ Fight Analysis Data:
 ${JSON.stringify(enrichedFights, null, 2)}
 
 For each fight, analyze:
+[Previous analysis guidelines remain the same...]
 
-1. Style Matchup Dynamics:
-- How each fighter's style matches up against their opponent
-- Historical performance against similar fighting styles
-- Key technical advantages/disadvantages
-- Range management and distance control
-
-2. Statistical Edge Analysis:
-- Significant strike differentials and accuracy
-- Defensive metrics and vulnerability patterns
-- Grappling efficiency and control time
-- Phase transition success rates
-
-3. Form and Momentum:
-- Recent performance trends
-- Quality of competition faced
-- Improvements or declines in key areas
-- Recovery and durability factors
-
-4. Fight-Specific Factors:
-- Weight class dynamics and size advantages
-- Cardio and pace considerations
-- Tournament/rankings implications
-- Location and venue impact
-
-Provide predictions in this exact JSON format:
+Provide predictions with a particular focus on betting opportunities in this exact JSON format:
 
 {
-    "fights": [
-        {
-            "fighter1": "Name",
-            "fighter2": "Name",
-            "predictedWinner": "Name",
-            "confidence": <55-85>,
-            "method": "KO/TKO/Submission/Decision",
-            "round": <1-5>,
-            "reasoning": "Specific, detailed analysis for this particular matchup, including technical dynamics and statistical evidence",
-            "keyFactors": [
-                "Specific advantage/factor with supporting stats",
-                "Style matchup element unique to this fight",
-                "Historical pattern relevant to this matchup",
-                "Physical or technical edge with evidence"
-            ],
-            "probabilityBreakdown": {
-                "ko_tko": <percentage>,
-                "submission": <percentage>,
-                "decision": <percentage>
-            }
-        }
-    ],
-"betting_analysis": {
-        "upsets": "Detailed breakdown of underdog opportunities including: specific fighters with realistic win conditions, statistical advantages that support the upset, and ideal betting approach. Example: 'Fighter A (+250) presents upset value due to superior takedown defense (85% vs 40%) against a favorite reliant on wrestling.'",
-        
-        "parlays": "List of 2-3 specific parlay combinations with detailed reasoning. Format each as: '[Fighter A] + [Fighter B] - Reasoning: [specific statistical/stylistic advantages]'. Focus on favorites with clear paths to victory and strong style advantages.",
-        
-        "value_parlays": "2-3 specific parlay opportunities combining underdog and favorite picks where odds create positive expected value. Include specific fighter names and odds analysis.",
-        
-        "method_props": "Specific finish predictions based on style matchups and historical data. Format as: '[Fighter] by [Method] - Supporting evidence: [relevant stats/history]'. Focus on fighters with clear finishing tendencies.",
-        
-        "round_props": "Round-specific predictions based on finish rates and cardio analysis. Include specific fighter names, target rounds, and supporting statistical evidence.",
-        
-        "special_props": "Creative prop opportunities based on fighter traits, such as: takedown totals for wrestlers, significant strike totals for volume strikers, or submission attempts for grapplers. Include specific statistical thresholds."
+  "fights": [
+      {
+          "fighter1": "Name",
+          "fighter2": "Name",
+          "predictedWinner": "Name",
+          "confidence": <55-85>,
+          "method": "KO/TKO/Submission/Decision",
+          "round": <1-5>,
+          "reasoning": "Specific, detailed analysis for this matchup",
+          "probabilityBreakdown": {
+              "ko_tko": <percentage>,
+              "submission": <percentage>,
+              "decision": <percentage>
+          }
       }
+  ],
+  "betting_analysis": {
+      "upsets": {
+          "opportunities": [
+              {
+                  "fighter": "<Underdog Name>",
+                  "confidence": <55-70>,
+                  "odds": "<american odds>",
+                  "reasoning": "Detailed statistical/stylistic advantages that create upset potential",
+                  "optimal_bet": "Specific bet recommendation (straight/prop/method)",
+                  "vulnerability_analysis": "Key weaknesses in favorite's game that underdog can exploit"
+              }
+          ]
+      },
+      "parlays": {
+          "combinations": [
+              {
+                  "type": "High Confidence Parlay",
+                  "picks": [
+                      {
+                          "fighter": "<Name>",
+                          "method": "<Method>",
+                          "confidence": <65-85>
+                      },
+                      {
+                          "fighter": "<Different Fight Winner>",
+                          "method": "<Method>",
+                          "confidence": <65-85>
+                      }
+                  ],
+                  "cumulative_confidence": <percentage>,
+                  "reasoning": "Style matchup and statistical evidence for each pick",
+                  "risk_assessment": "Analysis of key risks to parlay"
+              }
+          ],
+          "value_combinations": [
+              {
+                  "picks": [
+                      {
+                          "fighter": "<Favorite>",
+                          "confidence": <70-85>
+                      },
+                      {
+                          "fighter": "<Value Underdog>",
+                          "confidence": <55-65>
+                      }
+                  ],
+                  "reasoning": "Mathematical edge and style analysis",
+                  "implied_probability": <percentage>,
+                  "estimated_true_probability": <percentage>
+              }
+          ]
+      },
+      "method_props": {
+          "high_confidence_finishes": [
+              {
+                  "fighter": "<Name>",
+                  "method": "<Specific Finish Type>",
+                  "round_range": "<1-2 or 1-3 etc>",
+                  "confidence": <60-85>,
+                  "historical_evidence": "Past finishes & opponent vulnerability data",
+                  "style_analysis": "Technical breakdown of finishing sequence"
+              }
+          ]
+      },
+      "round_props": {
+          "predictions": [
+              {
+                  "fight": "<Fighter1 vs Fighter2>",
+                  "prediction": "Over/Under X.5 rounds",
+                  "confidence": <60-85>,
+                  "reasoning": "Detailed pace and durability analysis",
+                  "historical_data": "Relevant fight time statistics",
+                  "key_factors": [
+                      "Factor 1 with statistical support",
+                      "Factor 2 with statistical support"
+                  ]
+              }
+          ]
+      }
+  }
+}
 
-Guidelines:
-- Provide unique, fight-specific analysis for each matchup
-- Don't forget to consider fighter age. It can be a significant factor in predicting fight outcomes.
-- Support predictions with relevant statistics and historical patterns
-- Consider style matchups and physical attributes
-- Factor in recent form and quality of opposition
-- Include specific technical advantages that impact the outcome
-- Avoid generic or templated analysis.
-- Consider event-specific factors (location, stakes, etc.)
-- Detail paths to victory for upset picks
+Key Requirements for Betting Analysis:
+1. NEVER include both fighters from the same match in any parlay or combination
+2. Focus on identifying true value based on confidence vs. implied probability from odds
+3. Validate all finishes against historical fighter data
+4. Consider fighter durability and cardio when projecting round props
+5. Include specific technical analysis to support each betting recommendation
+6. Diversify fighter selection across different recommendations
+7. Include statistical evidence for all confidence ratings
+8. Account for style matchups and historical performance against similar opponents
+9. Always mention in the prediction if the lack of data or uncertainty affects the analysis. Dont mention it all if it doesn't.
 
-Remember to maintain maximum confidence of 90% due to MMA's inherent unpredictability. Focus on fight-specific dynamics rather than general observations.`;
+Remember to maintain maximum confidence of 95% due to MMA's inherent unpredictability. Focus on fight-specific dynamics rather than general observations.`;
 }
 
 async function generatePredictionsWithGPT(prompt) {
@@ -904,6 +943,84 @@ function invertAdvantage(advantage) {
     "Significant Disadvantage": "Significant Advantage"
   };
   return advantageMap[advantage] || advantage;
+}
+
+async function validateBettingAnalysis(analysis, fights) {
+  const usedFighters = new Set();
+  const fightMatchups = new Map();
+  
+  // Create map of fighter matchups
+  fights.forEach(fight => {
+      fightMatchups.set(fight.fighter1, fight.fighter2);
+      fightMatchups.set(fight.fighter2, fight.fighter1);
+  });
+
+  // Validate parlays
+  const validateParlay = (parlay) => {
+      const parleyFighters = new Set();
+      let isValid = true;
+      
+      parlay.picks.forEach(pick => {
+          // Check if fighter is already used
+          if (parleyFighters.has(pick.fighter)) {
+              isValid = false;
+              return;
+          }
+          
+          // Check if opponent is in parlay
+          const opponent = fightMatchups.get(pick.fighter);
+          if (parleyFighters.has(opponent)) {
+              isValid = false;
+              return;
+          }
+          
+          parleyFighters.add(pick.fighter);
+      });
+      
+      return isValid;
+  };
+
+  // Clean up parlays
+  if (analysis.betting_analysis.parlays?.combinations) {
+      analysis.betting_analysis.parlays.combinations = 
+          analysis.betting_analysis.parlays.combinations.filter(validateParlay);
+  }
+  
+  if (analysis.betting_analysis.parlays?.value_combinations) {
+      analysis.betting_analysis.parlays.value_combinations = 
+          analysis.betting_analysis.parlays.value_combinations.filter(validateParlay);
+  }
+
+  // Validate and clean method props
+  if (analysis.betting_analysis.method_props?.high_confidence_finishes) {
+      const validMethodProps = [];
+      for (const prop of analysis.betting_analysis.method_props.high_confidence_finishes) {
+          if (!usedFighters.has(prop.fighter)) {
+              validMethodProps.push(prop);
+              usedFighters.add(prop.fighter);
+          }
+      }
+      analysis.betting_analysis.method_props.high_confidence_finishes = validMethodProps;
+  }
+
+  // Ensure diverse fighter selection
+  const maxRecommendationsPerFighter = 2;
+  const fighterCounts = new Map();
+  
+  const updateFighterCount = (fighter) => {
+      const count = fighterCounts.get(fighter) || 0;
+      fighterCounts.set(fighter, count + 1);
+      return count < maxRecommendationsPerFighter;
+  };
+
+  // Clean up upsets
+  if (analysis.betting_analysis.upsets?.opportunities) {
+      analysis.betting_analysis.upsets.opportunities = 
+          analysis.betting_analysis.upsets.opportunities
+              .filter(upset => updateFighterCount(upset.fighter));
+  }
+
+  return analysis;
 }
 
 async function calculateFightSpecificMetrics(fighter1, fighter2) {

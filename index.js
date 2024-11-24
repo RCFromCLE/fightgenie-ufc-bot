@@ -271,29 +271,37 @@ client.on("messageCreate", async (message) => {
 
         break;
 
-        case "advance":
-          if (message.guild?.id !== "496121279712329756") {
-              console.log(`Unauthorized advance attempt from guild ${message.guild?.id}`);
-              return;
-          }
-          if (!message.member?.permissions.has("Administrator")) {
-              await message.reply("❌ This command requires administrator permissions.");
-              return;
-          }
-          await AdminEventCommand.handleAdvanceEvent(message);
-          break;
-  
+      case "advance":
+        if (message.guild?.id !== "496121279712329756") {
+          console.log(
+            `Unauthorized advance attempt from guild ${message.guild?.id}`
+          );
+          return;
+        }
+        if (!message.member?.permissions.has("Administrator")) {
+          await message.reply(
+            "❌ This command requires administrator permissions."
+          );
+          return;
+        }
+        await AdminEventCommand.handleAdvanceEvent(message);
+        break;
+
       case "forceupdate":
-          if (message.guild?.id !== "496121279712329756") {
-              console.log(`Unauthorized forceupdate attempt from guild ${message.guild?.id}`);
-              return;
-          }
-          if (!message.member?.permissions.has("Administrator")) {
-              await message.reply("❌ This command requires administrator permissions.");
-              return;
-          }
-          await AdminEventCommand.forceUpdateCurrentEvent(message);
-          break;
+        if (message.guild?.id !== "496121279712329756") {
+          console.log(
+            `Unauthorized forceupdate attempt from guild ${message.guild?.id}`
+          );
+          return;
+        }
+        if (!message.member?.permissions.has("Administrator")) {
+          await message.reply(
+            "❌ This command requires administrator permissions."
+          );
+          return;
+        }
+        await AdminEventCommand.forceUpdateCurrentEvent(message);
+        break;
       case "checkstats":
         await CheckStatsCommand.handleCheckStats(message, args);
 
@@ -456,11 +464,8 @@ client.on("interactionCreate", async (interaction) => {
 
         case "betting":
           if (args[0] === "analysis") {
-            const event = await EventHandlers.getUpcomingEvent();
-            await EventHandlers.displayBettingAnalysis(
-              interaction,
-              event.event_id
-            );
+            const eventId = args[1];
+            await EventHandlers.displayBettingAnalysis(interaction, eventId);
           }
           break;
 
