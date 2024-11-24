@@ -5,6 +5,8 @@ const {
 
   GatewayIntentBits,
 
+  ActivityType,
+
   EmbedBuilder,
 
   ButtonBuilder,
@@ -41,6 +43,8 @@ const OddsAnalysis = require("./src/utils/OddsAnalysis");
 const StatsDisplayHandler = require("./src/utils/StatsDisplayHandler");
 
 const AdminLogger = require("./src/utils/AdminLogger");
+
+const AdminEventCommand = require("./src/commands/AdminEventCommand");
 
 const COMMAND_PREFIX = "$";
 
@@ -267,44 +271,36 @@ client.on("messageCreate", async (message) => {
 
         break;
 
+        case "advance":
+          if (message.guild?.id !== "496121279712329756") {
+              console.log(`Unauthorized advance attempt from guild ${message.guild?.id}`);
+              return;
+          }
+          if (!message.member?.permissions.has("Administrator")) {
+              await message.reply("❌ This command requires administrator permissions.");
+              return;
+          }
+          await AdminEventCommand.handleAdvanceEvent(message);
+          break;
+  
+      case "forceupdate":
+          if (message.guild?.id !== "496121279712329756") {
+              console.log(`Unauthorized forceupdate attempt from guild ${message.guild?.id}`);
+              return;
+          }
+          if (!message.member?.permissions.has("Administrator")) {
+              await message.reply("❌ This command requires administrator permissions.");
+              return;
+          }
+          await AdminEventCommand.forceUpdateCurrentEvent(message);
+          break;
       case "checkstats":
         await CheckStatsCommand.handleCheckStats(message, args);
 
         break;
 
       case "stats":
-        await retryCommand(async () => {
-          const loadingEmbed = new EmbedBuilder()
-
-            .setColor("#ffff00")
-
-            .setTitle("📊 Loading Fight Genie Statistics")
-
-            .setDescription("Fetching and analyzing prediction accuracy...");
-
-          const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
-
-          try {
-            await database.updatePredictionOutcomes();
-
-            const stats = await ModelStatsCommand.getEnhancedModelStats();
-
-            const statsEmbed =
-              ModelStatsCommand.createEnhancedStatsEmbed(stats);
-
-            await loadingMsg.edit({ embeds: [statsEmbed] });
-          } catch (error) {
-            console.error("Error handling model stats command:", error);
-
-            await loadingMsg.edit({
-              content:
-                "An error occurred while fetching Fight Genie statistics.",
-
-              embeds: [],
-            });
-          }
-        });
-
+        await ModelStatsCommand.handleModelStatsCommand(message);
         break;
 
       case "help":
@@ -337,6 +333,15 @@ client.on("interactionCreate", async (interaction) => {
   try {
     // Handle Select Menus
     if (interaction.isStringSelectMenu()) {
+      // Handle view_historical_predictions select menu
+      if (interaction.customId === "view_historical_predictions") {
+        const [type, eventId, timestamp] = interaction.values[0].split("_");
+        if (type === "event") {
+          await ModelStatsCommand.handleHistoricalView(interaction);
+        }
+        return;
+      }
+
       if (interaction.customId.startsWith("fighter_stats_")) {
         const selectedValue = interaction.values[0];
         if (selectedValue === "all_data_status") {
@@ -449,32 +454,75 @@ client.on("interactionCreate", async (interaction) => {
           await EventHandlers.handleButtonInteraction(interaction);
           break;
 
-        case "get":
+        case "betting":
           if (args[0] === "analysis") {
             const event = await EventHandlers.getUpcomingEvent();
-            const currentModel = ModelCommand.getCurrentModel();
-            const predictions = await PredictionHandler.getStoredPrediction(
-              event.event_id,
-              "main",
-              currentModel
-            );
-
-            await PredictionHandler.sendDetailedAnalysis(
+            await EventHandlers.displayBettingAnalysis(
               interaction,
-              predictions,
-              event,
-              currentModel
+              event.event_id
             );
           }
           break;
 
-        case "betting":
+        case "get":
           if (args[0] === "analysis") {
-            const event = await EventHandlers.getUpcomingEvent();
-            await PredictionHandler.handleBettingAnalysis(
-              interaction,
-              event.event_id
-            );
+            try {
+              const event = await EventHandlers.getUpcomingEvent();
+              if (!event) {
+                await interaction.editReply({
+                  content: "No upcoming events found.",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              const currentModel = ModelCommand.getCurrentModel();
+              console.log("Getting predictions for analysis:", {
+                eventId: event.event_id,
+                model: currentModel,
+              });
+
+              const predictions = await PredictionHandler.getStoredPrediction(
+                event.event_id,
+                "main",
+                currentModel
+              );
+
+              if (!predictions) {
+                await interaction.editReply({
+                  content:
+                    "No predictions found for this event. Please generate predictions first.",
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              try {
+                await interaction.user.send({
+                  content: "Preparing detailed analysis...",
+                });
+
+                await PredictionHandler.sendDetailedAnalysis(
+                  interaction,
+                  predictions,
+                  event,
+                  currentModel
+                );
+              } catch (dmError) {
+                console.error("DM Error:", dmError);
+                await interaction.editReply({
+                  content:
+                    "❌ Unable to send detailed analysis. Please make sure your DMs are open.",
+                  ephemeral: true,
+                });
+              }
+            } catch (error) {
+              console.error("Error handling analysis request:", error);
+              await interaction.editReply({
+                content: "Error generating analysis. Please try again.",
+                ephemeral: true,
+              });
+            }
           }
           break;
 
@@ -653,7 +701,7 @@ function createHelpEmbed() {
     )
 
     .setFooter({
-      text: "Data from UFCStats.com | Powered by Claude & GPT-4 | Fight Genie",
+      text: "Data from UFCStats.com | Powered by Claude & GPT-4 | Fight Genie 1.0",
 
       iconURL:
         "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",
@@ -662,10 +710,14 @@ function createHelpEmbed() {
 
 client.once("ready", () => {
   isClientReady = true;
-
   console.log(`Bot is ready as ${client.user.tag}`);
 
-  // console.log("Connected to allowed channel:", ALLOWED_CHANNEL_ID);
+  client.user.setActivity(
+    `AI UFC Predictions | $help | ${
+      11 + Math.max(0, client.guilds.cache.size - 1)
+    } servers`,
+    { type: ActivityType.Competing }
+  );
 });
 
 async function startup() {

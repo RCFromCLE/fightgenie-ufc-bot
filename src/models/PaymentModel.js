@@ -250,55 +250,63 @@ class PaymentModel {
 
   static async activateServerEventAccess(serverId, paymentId) {
     try {
-      console.log("Activating event access:", { serverId, paymentId });
+        console.log("Activating event access:", { serverId, paymentId });
 
-      // Get the next event's date for expiration
-      const event = await database.query(`
-                SELECT event_id, Date 
-                FROM events 
-                WHERE Date >= date('now') 
-                ORDER BY Date ASC 
-                LIMIT 1
-            `);
+        const event = await database.query(`
+            SELECT event_id, Date 
+            FROM events 
+            WHERE Date >= date('now') 
+            ORDER BY Date ASC 
+            LIMIT 1
+        `);
 
-      if (!event || !event[0]) {
-        throw new Error("No upcoming event found");
-      }
-      // Set expiration to 1:30 AM the next day after the event
-      const eventDate = new Date(event[0].Date);
-      const expirationDate = new Date(eventDate);
-      expirationDate.setDate(eventDate.getDate() + 1); // Next day
-      expirationDate.setHours(1, 30, 0, 0); // 1:30 AM
-      await database.query(
-        `
-                INSERT INTO server_subscriptions (
-                    server_id,
-                    subscription_type,
-                    payment_id,
-                    status,
-                    event_id,
-                    expiration_date,
-                    created_at,
-                    updated_at
-                ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'), datetime('now'))
-            `,
-        [serverId, paymentId, event[0].event_id, expirationDate.toISOString()]
-      );
+        if (!event || !event[0]) {
+            throw new Error("No upcoming event found");
+        }
 
-      console.log("Event access activated:", {
-        eventId: event[0].event_id,
-        expiration: expirationDate,
-      });
+        // Set expiration to 1:30 AM EST the day after the event
+        const eventDate = new Date(event[0].Date);
+        const expirationDate = new Date(eventDate);
+        expirationDate.setDate(eventDate.getDate() + 1);
+        
+        // Set to exactly 1:30 AM EST
+        expirationDate.setHours(1, 30, 0, 0);
 
-      return {
-        eventId: event[0].event_id,
-        expirationDate: expirationDate,
-      };
+        // Convert from EST to UTC for storage
+        const utcExpirationDate = new Date(
+            expirationDate.toLocaleString('en-US', { 
+                timeZone: 'America/New_York' 
+            })
+        );
+
+        await database.query(
+            `INSERT INTO server_subscriptions (
+                server_id,
+                subscription_type,
+                payment_id,
+                status,
+                event_id,
+                expiration_date,
+                created_at,
+                updated_at
+            ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'), datetime('now'))
+        `, [serverId, paymentId, event[0].event_id, utcExpirationDate.toISOString()]);
+
+        console.log("Event access activated:", {
+            eventId: event[0].event_id,
+            expiration: utcExpirationDate,
+            eventDate: eventDate
+        });
+
+        return {
+            eventId: event[0].event_id,
+            expirationDate: utcExpirationDate
+        };
     } catch (error) {
-      console.error("Error activating server event access:", error);
-      throw error;
+        console.error("Error activating server event access:", error);
+        throw error;
     }
-  }
+}
 
   static async checkServerAccess(serverId, eventId = null) {
     try {

@@ -129,11 +129,6 @@ static async handleOddsCommand(interaction, model, eventId, bookmaker = 'fanduel
                     .setLabel('Prelims Odds')
                     .setEmoji('🥊')
                     .setStyle(cardType === 'prelims' ? ButtonStyle.Success : ButtonStyle.Secondary),
-                new ButtonBuilder()
-                    .setCustomId(`predict_main_${currentModel}_${currentEventId}`)
-                    .setLabel('Back to Predictions')
-                    .setEmoji('📊')
-                    .setStyle(ButtonStyle.Primary)
             );
 
         const optionsRow = new ActionRowBuilder()
@@ -160,6 +155,16 @@ static async handleOddsCommand(interaction, model, eventId, bookmaker = 'fanduel
         }
     }
   }
+
+  static calculateImpliedProbability(americanOdds) {
+    if (!americanOdds) return null;
+    
+    if (americanOdds > 0) {
+        return (100 / (americanOdds + 100)) * 100;
+    } else {
+        return (Math.abs(americanOdds) / (Math.abs(americanOdds) + 100)) * 100;
+    }
+}
 
   static getFightOdds(fight, oddsData, bookmaker) {
     if (!oddsData || !bookmaker) return null;

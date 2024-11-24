@@ -68,7 +68,9 @@ class StatsManager {
             console.error("Error getting record for", fighterName, ":", error);
             return { wins: 0, losses: 0, draws: 0 };
         }
-    }static formatDetailedFighterStats(fighter1Name, fighter1Stats, fighter2Name, fighter2Stats) {
+    }
+    
+    static formatDetailedFighterStats(fighter1Name, fighter1Stats, fighter2Name, fighter2Stats) {
       const formatFighterBlock = (name, stats) => {
           if (!stats) return `${name}: No stats available`;
 

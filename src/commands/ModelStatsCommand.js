@@ -1,369 +1,480 @@
-// ModelStatsCommand.js - Enhanced version
-
-const { EmbedBuilder } = require("discord.js");
+const {
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+  ActionRowBuilder,
+} = require("discord.js");
 const database = require("../database");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
 class ModelStatsCommand {
-    static async fetchEventFromUFCStats(eventName, eventDate) {
+    static async handleModelStatsCommand(message) {
         try {
-            // First, search for the event on ufcstats.com
-            const searchResponse = await axios.get(
-                "http://ufcstats.com/statistics/events/completed?page=all"
-            );
-            const $ = cheerio.load(searchResponse.data);
-
-            let eventLink = null;
-
-            // Find the event link by matching event name and date
-            $("tr.b-statistics__table-row").each((_, element) => {
-                const rowEventName = $(element).find("td:first-child a").text().trim();
-                const rowDate = $(element).find("td:nth-child(2)").text().trim();
-
-                // Flexible matching for event name and date
-                if (
-                    rowEventName.toLowerCase().includes(eventName.toLowerCase()) &&
-                    new Date(rowDate).toISOString().slice(0, 10) ===
-                    new Date(eventDate).toISOString().slice(0, 10)
-                ) {
-                    eventLink = $(element).find("td:first-child a").attr("href");
+            const loadingMsg = await message.reply("⌛ Analyzing fight results...");
+    
+            // Modified query to only get events that have started and have at least one completed fight
+            const events = await database.query(`
+                SELECT DISTINCT 
+                    e.event_id,
+                    e.Event,
+                    e.Date,
+                    e.event_link,
+                    COUNT(DISTINCT sp.prediction_id) as prediction_count,
+                    COUNT(DISTINCT CASE WHEN sp.card_type = 'main' THEN sp.prediction_id END) as main_predictions,
+                    COUNT(DISTINCT CASE WHEN sp.card_type = 'prelims' THEN sp.prediction_id END) as prelim_predictions,
+                    GROUP_CONCAT(DISTINCT sp.model_used) as models_used
+                FROM events e
+                JOIN stored_predictions sp ON e.event_id = sp.event_id
+                WHERE prediction_data IS NOT NULL
+                AND (
+                    Date < date('now') 
+                    OR (
+                        Date = date('now') 
+                        AND EXISTS (
+                            SELECT 1 FROM fight_results fr 
+                            WHERE fr.event_id = e.event_id 
+                            AND fr.is_completed = 1
+                        )
+                    )
+                )
+                GROUP BY e.event_id, e.Event, e.Date, e.event_link
+                ORDER BY e.Date DESC
+            `)
+                
+            console.log(`Found ${events.length} events to analyze`);
+            let allResults = [];
+            const scrapedEvents = new Map();
+    
+            for (const event of events) {
+                console.log(`\nProcessing event: ${event.Event}`);
+                
+                const predictions = await database.query(`
+                    SELECT prediction_id, model_used, card_type, prediction_data
+                    FROM stored_predictions
+                    WHERE event_id = ?
+                `, [event.event_id]);
+    
+                let scrapedResults;
+                if (scrapedEvents.has(event.event_id)) {
+                    scrapedResults = scrapedEvents.get(event.event_id);
+                } else if (event.event_link) {
+                    scrapedResults = await this.scrapeEventResults(event.event_link);
+                    scrapedEvents.set(event.event_id, scrapedResults);
                 }
-            });
-
-            if (!eventLink) {
-                console.log(`Event not found: ${eventName} on ${eventDate}`);
-                return null;
+    
+                if (!scrapedResults?.length) {
+                    console.log(`No results found for ${event.Event}`);
+                    continue;
+                }
+    
+                for (const pred of predictions) {
+                    try {
+                        const predictionData = JSON.parse(pred.prediction_data);
+                        const fights = predictionData.fights || [];
+                        
+                        const verifiedFights = fights.filter(fight => 
+                            scrapedResults.some(r => 
+                                (r.winner === fight.fighter1?.trim() && r.loser === fight.fighter2?.trim()) ||
+                                (r.winner === fight.fighter2?.trim() && r.loser === fight.fighter1?.trim())
+                            )
+                        );
+    
+                        if (verifiedFights.length > 0) {
+                            const results = {
+                                event_id: event.event_id,
+                                Event: event.Event,
+                                Date: event.Date,
+                                model: pred.model_used,
+                                card_type: pred.card_type,
+                                fights_predicted: verifiedFights.length,
+                                correct_predictions: verifiedFights.filter(fight => {
+                                    const result = scrapedResults.find(r => 
+                                        (r.winner === fight.fighter1?.trim() && r.loser === fight.fighter2?.trim()) ||
+                                        (r.winner === fight.fighter2?.trim() && r.loser === fight.fighter1?.trim())
+                                    );
+                                    return result && fight.predictedWinner?.trim() === result.winner;
+                                }).length,
+                                method_correct: verifiedFights.filter(fight => {
+                                    const result = scrapedResults.find(r => 
+                                        (r.winner === fight.fighter1?.trim() && r.loser === fight.fighter2?.trim()) ||
+                                        (r.winner === fight.fighter2?.trim() && r.loser === fight.fighter1?.trim())
+                                    );
+                                    return result && result.method?.toLowerCase().includes(fight.method?.toLowerCase() || '');
+                                }).length,
+                                confidence_sum: verifiedFights.reduce((sum, fight) => sum + (Number(fight.confidence) || 0), 0)
+                            };
+                            allResults.push(results);
+                        }
+                    } catch (error) {
+                        console.error(`Error processing prediction data:`, error);
+                    }
+                }
             }
+    
+            const modelStats = {};
+            allResults.forEach(result => {
+                if (!modelStats[result.model]) {
+                    modelStats[result.model] = {
+                        events: new Set(),
+                        fights_predicted: 0,
+                        correct_predictions: 0,
+                        method_correct: 0,
+                        confidence_sum: 0
+                    };
+                }
+                
+                modelStats[result.model].events.add(result.event_id);
+                modelStats[result.model].fights_predicted += result.fights_predicted;
+                modelStats[result.model].correct_predictions += result.correct_predictions;
+                modelStats[result.model].method_correct += result.method_correct;
+                modelStats[result.model].confidence_sum += result.confidence_sum;
+            });
+    
+            const embed = new EmbedBuilder()
+                .setColor("#0099ff")
+                .setTitle("🤖 Fight Genie Model Analysis")
+                .setDescription("Model Performance Comparison\nBased on completed fight predictions only\n\n━━━━━━━━━━━━━━━━━━━━━━")
+                .setThumbnail("attachment://FightGenie_Logo_1.PNG");
+    
+                Object.entries(modelStats).forEach(([model, stats]) => {
+                    const modelName = model === "gpt" ? "GPT-4" : "Claude";
+                    const modelEmoji = model === "gpt" ? "🧠" : "🤖";
+                    
+                    const winRate = ((stats.correct_predictions / stats.fights_predicted) * 100).toFixed(1);
+                    const methodAccuracy = ((stats.method_correct / stats.fights_predicted) * 100).toFixed(1);
+                    const avgConfidence = (stats.confidence_sum / stats.fights_predicted).toFixed(1);
+                
+                    embed.addFields({
+                        name: `${modelEmoji} ${modelName} Performance`,
+                        value: [
+                            `Events Analyzed: ${events.length}`,  // Simply use events.length here
+                            `Fights Predicted: ${stats.fights_predicted}`,
+                            `Win Rate: ${winRate}%`,
+                            `Method Accuracy: ${methodAccuracy}%`,
+                            `Average Confidence: ${avgConfidence}%`
+                        ].join("\n"),
+                        inline: true
+                    });
+                });
 
-            // Fetch event details
-            const eventResponse = await axios.get(eventLink);
-            const event$ = cheerio.load(eventResponse.data);
-
-            const fights = [];
-
-            // Parse fight results
-            event$("tbody tr").each((_, fightRow) => {
-                const $row = event$(fightRow);
-                const winner = $row
-                    .find("td.b-fight-details__table-col:first-child a")
-                    .first()
-                    .text()
-                    .trim();
-                const loser = $row
-                    .find("td.b-fight-details__table-col:first-child a")
-                    .last()
-                    .text()
-                    .trim();
-                const method = $row
-                    .find("td.b-fight-details__table-col_style_align-top")
-                    .text()
-                    .trim();
-                const round = $row
-                    .find("td.b-fight-details__table-col:nth-child(8)")
-                    .text()
-                    .trim();
-                const time = $row
-                    .find("td.b-fight-details__table-col:nth-child(9)")
-                    .text()
-                    .trim();
-
-                if (winner && loser) {
-                    fights.push({
-                        winner,
-                        loser,
-                        method,
-                        round,
-                        time,
+            // Event selection dropdown setup
+            const eventOptions = [];
+            const seenEvents = new Set();
+            
+            events.forEach(event => {
+                const eventKey = `${event.Event}_${event.Date}`;
+                if (!seenEvents.has(eventKey)) {
+                    seenEvents.add(eventKey);
+                    eventOptions.push({
+                        label: event.Event,
+                        description: new Date(event.Date).toLocaleDateString(),
+                        value: `event_${event.event_id}_${Date.now()}`,
+                        emoji: "📊"
                     });
                 }
             });
-
-            return {
-                eventLink,
-                fights,
-            };
-        } catch (error) {
-            console.error("Error fetching from UFCStats:", error);
-            return null;
-        }
-    }
-
-    static async processPredictionOutcomes(prediction) {
-        try {
-            const predictionData = JSON.parse(prediction.prediction_data);
-
-            // Process fight predictions
-            const fightResults = [];
-            if (predictionData.fights) {
-                for (const fight of predictionData.fights) {
-                    const result = {
-                        fighter1: fight.fighter1,
-                        fighter2: fight.fighter2,
-                        predictedWinner: fight.predictedWinner,
-                        confidence: fight.confidence || null,
-                        correct: null, // Will be updated when comparing with actual results
-                    };
-                    fightResults.push(result);
-                }
-            }
-
-            // Process parlay predictions
-            const parlayResults = [];
-            if (predictionData.parlays) {
-                for (const parlay of predictionData.parlays) {
-                    const result = {
-                        legs: parlay.legs,
-                        predictedOutcome: parlay.predictedOutcome,
-                        confidence: parlay.confidence || null,
-                        correct: null, // Will be updated when comparing with actual results
-                    };
-                    parlayResults.push(result);
-                }
-            }
-
-            // Process prop predictions
-            const propResults = [];
-            if (predictionData.props) {
-                for (const prop of predictionData.props) {
-                    const result = {
-                        type: prop.type,
-                        fighters: prop.fighters,
-                        prediction: prop.prediction,
-                        confidence: prop.confidence || null,
-                        correct: null, // Will be updated when comparing with actual results
-                    };
-                    propResults.push(result);
-                }
-            }
-
-            return {
-                fightResults,
-                parlayResults,
-                propResults,
-            };
-        } catch (error) {
-            console.error("Error processing prediction outcomes:", error);
-            return null;
-        }
-    }
-
-    static async updatePredictionOutcomes() {
-        try {
-            // Create prediction_outcomes table if it doesn't exist
-            await database.query(`CREATE TABLE IF NOT EXISTS prediction_outcomes (
-                outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_id INTEGER,
-                prediction_id INTEGER,
-                event_name TEXT,
-                event_date TEXT,
-                fight_result TEXT,
-                parlay_result TEXT,
-                prop_result TEXT,
-                outcome_verified BOOLEAN DEFAULT FALSE,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(event_id) REFERENCES events(event_id),
-                FOREIGN KEY(prediction_id) REFERENCES stored_predictions(prediction_id)
-            )`);
-
-            // Get all predictions that need outcome verification
-            const predictions = await database.query(`
-                SELECT 
-                    sp.*,
-                    e.Event as event_name,
-                    e.Date as event_date
-                FROM stored_predictions sp
-                JOIN events e ON sp.event_id = e.event_id
-                LEFT JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
-                WHERE po.prediction_id IS NULL
-                AND e.Date < datetime('now')
-                ORDER BY e.Date DESC
-            `);
-
-            console.log(
-                `Found ${predictions.length} predictions needing outcome verification`
-            );
-
-            for (const prediction of predictions) {
-                console.log(
-                    `Processing prediction for event: ${prediction.event_name}`
-                );
-
-                // Fetch event results from UFCStats
-                const ufcStatsResults = await this.fetchEventFromUFCStats(
-                    prediction.event_name,
-                    prediction.event_date
-                );
-
-                if (!ufcStatsResults) {
-                    console.log(`No results found for event: ${prediction.event_name}`);
-                    continue;
-                }
-
-                // Process prediction outcomes
-                const outcomes = await this.processPredictionOutcomes(prediction);
-
-                if (!outcomes) {
-                    console.log(
-                        `Error processing outcomes for prediction ${prediction.prediction_id}`
-                    );
-                    continue;
-                }
-
-                // Store the outcomes
-                await database.query(
-                    `
-                    INSERT INTO prediction_outcomes (
-                        event_id,
-                        prediction_id,
-                        event_name,
-                        event_date,
-                        fight_result,
-                        parlay_result,
-                        prop_result,
-                        outcome_verified
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                `,
-                    [
-                        prediction.event_id,
-                        prediction.prediction_id,
-                        prediction.event_name,
-                        prediction.event_date,
-                        JSON.stringify(outcomes.fightResults),
-                        JSON.stringify(outcomes.parlayResults),
-                        JSON.stringify(outcomes.propResults),
-                        true,
-                    ]
-                );
-
-                console.log(
-                    `Stored outcomes for prediction ${prediction.prediction_id}`
-                );
-
-                // Add delay to prevent rate limiting
-                await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
-        } catch (error) {
-            console.error("Error updating prediction outcomes:", error);
-            throw error;
-        }
-    }
-
-    static async getEnhancedModelStats() {
-        try {
-            const stats = await database.query(`
-                SELECT 
-                    sp.model_used,
-                    COUNT(DISTINCT sp.event_id) as events_analyzed,
-                    -- Fight stats
-                    SUM(CASE WHEN json_extract(fight_result, '$[*].correct') = 1 THEN 1 ELSE 0 END) as correct_fights,
-                    COUNT(json_extract(fight_result, '$[*].correct')) as total_fights,
-                    -- Parlay stats  
-                    SUM(CASE WHEN json_extract(parlay_result, '$[*].correct') = 1 THEN 1 ELSE 0 END) as correct_parlays,
-                    COUNT(json_extract(parlay_result, '$[*].correct')) as total_parlays,
-                    -- Prop stats
-                    SUM(CASE WHEN json_extract(prop_result, '$[*].correct') = 1 THEN 1 ELSE 0 END) as correct_props,
-                    COUNT(json_extract(prop_result, '$[*].correct')) as total_props
-                FROM stored_predictions sp
-                JOIN prediction_outcomes po ON sp.prediction_id = po.prediction_id
-                GROUP BY sp.model_used           
-            `);
-
-            return stats.map((stat) => ({
-                model: stat.model_used,
-                eventsAnalyzed: stat.events_analyzed,
-                fights: {
-                    correct: stat.correct_fights,
-                    total: stat.total_fights,
-                    accuracy:
-                        stat.total_fights > 0
-                            ? (stat.correct_fights / stat.total_fights) * 100
-                            : 0,
-                },
-                parlays: {
-                    correct: stat.correct_parlays,
-                    total: stat.total_parlays,
-                    accuracy:
-                        stat.total_parlays > 0
-                            ? (stat.correct_parlays / stat.total_parlays) * 100
-                            : 0,
-                },
-                props: {
-                    correct: stat.correct_props,
-                    total: stat.total_props,
-                    accuracy:
-                        stat.total_props > 0
-                            ? (stat.correct_props / stat.total_props) * 100
-                            : 0,
-                },
-            }));
-        } catch (error) {
-            console.error("Error getting enhanced stats:", error);
-            throw error;
-        }
-    }
-
-    static createEnhancedStatsEmbed(stats) {
-        const embed = new EmbedBuilder()
-            .setColor("#0099ff")
-            .setTitle("🤖 Fight Genie Performance Analysis")
-            .setDescription("Comprehensive Fight Prediction Statistics");
-
-        for (const stat of stats) {
-            const modelName = stat.model.toUpperCase();
-            const modelEmoji = stat.model === "gpt" ? "🧠" : "🤖";
-
-            embed.addFields({
-                name: `${modelEmoji} ${modelName} Performance`,
-                value: [
-                    `Events Analyzed: ${stat.eventsAnalyzed}`,
-                    "",
-                    "🥊 Fight Predictions:",
-                    `├ Accuracy: ${stat.fights.accuracy.toFixed(1)}%`,
-                    `└ Record: ${stat.fights.correct}/${stat.fights.total}`,
-                    "",
-                    "🎲 Parlay Predictions:",
-                    `├ Accuracy: ${stat.parlays.accuracy.toFixed(1)}%`,
-                    `└ Record: ${stat.parlays.correct}/${stat.parlays.total}`,
-                    "",
-                    "🎯 Prop Predictions:",
-                    `├ Accuracy: ${stat.props.accuracy.toFixed(1)}%`,
-                    `└ Record: ${stat.props.correct}/${stat.props.total}`,
-                ].join("\n"),
-                inline: false,
+    
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId("view_historical_predictions")
+                .setPlaceholder("View Event Predictions")
+                .addOptions(eventOptions.slice(0, 25));
+    
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+    
+            await loadingMsg.edit({
+                content: null,
+                embeds: [embed],
+                components: [row],
+                files: [{
+                    attachment: "./src/images/FightGenie_Logo_1.PNG",
+                    name: "FightGenie_Logo_1.PNG"
+                }]
             });
-        }
-
-        embed.setFooter({
-            text: "Fight Genie - Powered by AI",
-            iconURL: "https://your-bot-icon-url.com", // Replace with your bot's icon URL
-        });
-
-        return embed;
-    }
-
-    static async handleModelStatsCommand(message) {
-        try {
-            const loadingEmbed = new EmbedBuilder()
-                .setColor("#ffff00")
-                .setTitle("📊 Loading Fight Genie Statistics")
-                .setDescription("Fetching and analyzing prediction accuracy...");
-
-            const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
-
-            // Update outcomes and get enhanced stats
-            await this.updatePredictionOutcomes();
-            const stats = await this.getEnhancedModelStats();
-            const statsEmbed = this.createEnhancedStatsEmbed(stats);
-
-            await loadingMsg.edit({ embeds: [statsEmbed] });
+    
         } catch (error) {
             console.error("Error handling model stats command:", error);
-            await message.reply(
-                "An error occurred while fetching Fight Genie statistics."
-            );
+            await message.reply("Error retrieving Fight Genie statistics. Please try again.");
         }
+    }  static async processEventPredictions(event, predictions, scrapedResults) {
+    const eventResults = [];
+
+    for (const pred of predictions) {
+      try {
+        const predictionData = JSON.parse(pred.prediction_data);
+        const fights = predictionData.fights;
+
+        let results = {
+          event_id: event.event_id,
+          Event: event.Event,
+          Date: event.Date,
+          model: pred.model_used,
+          card_type: pred.card_type,
+          fight_details: [], // Store only actual verified fights
+        };
+
+        for (const fight of fights) {
+          const matchingResult = scrapedResults.find(
+            (r) =>
+              (r.winner === fight.fighter1?.trim() &&
+                r.loser === fight.fighter2?.trim()) ||
+              (r.winner === fight.fighter2?.trim() &&
+                r.loser === fight.fighter1?.trim())
+          );
+
+          if (matchingResult) {
+            // Only add fights that have actual results
+            results.fight_details.push({
+              fighters: `${fight.fighter1} vs ${fight.fighter2}`,
+              prediction: {
+                winner: fight.predictedWinner,
+                method: fight.method,
+                confidence: Number(fight.confidence) || 0,
+              },
+              actual: {
+                winner: matchingResult.winner,
+                method: matchingResult.method,
+              },
+              isCorrect:
+                fight.predictedWinner?.trim() === matchingResult.winner,
+              isMethodCorrect: matchingResult.method
+                ?.toLowerCase()
+                .includes(fight.method?.toLowerCase() || ""),
+            });
+          }
+        }
+
+        if (results.fight_details.length > 0) {
+          eventResults.push(results);
+        }
+      } catch (error) {
+        console.error(`Error processing prediction for ${event.Event}:`, error);
+      }
     }
+
+    return eventResults;
+  }
+
+  static async handleHistoricalView(interaction) {
+    try {
+      await interaction.deferReply({ ephemeral: true });
+
+      const [_, eventId, timestamp] = interaction.values[0].split("_");
+
+      // Get event details and predictions
+      const event = await database.query(
+        `
+            SELECT e.*
+            FROM events e
+            WHERE e.event_id = ?
+        `,
+        [eventId]
+      );
+
+      if (!event?.length) {
+        await interaction.editReply("Event not found");
+        return;
+      }
+
+      // Check if event is in the future or today
+      const eventDate = new Date(event[0].Date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (eventDate >= today) {
+        await interaction.editReply(
+          "Results not yet available - event has not occurred"
+        );
+        return;
+      }
+
+      console.log("Found event:", event[0].Event);
+
+      const predictions = await database.query(
+        `
+            SELECT sp.*, e.Event, e.Date
+            FROM stored_predictions sp
+            JOIN events e ON sp.event_id = e.event_id
+            WHERE e.event_id = ?
+            ORDER BY sp.model_used, sp.card_type
+        `,
+        [eventId]
+      );
+
+      if (!predictions?.length) {
+        await interaction.editReply("No predictions found for this event");
+        return;
+      }
+
+      // Get actual results
+      const scrapedResults = await this.scrapeEventResults(event[0].event_link);
+      if (!scrapedResults?.length) {
+        await interaction.editReply("No results found for this event");
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle(`📊 ${event[0].Event}`)
+        .setDescription(
+          `Detailed Fight Predictions and Results\n${new Date(
+            event[0].Date
+          ).toLocaleDateString()}`
+        )
+        .setThumbnail("attachment://FightGenie_Logo_1.PNG");
+
+      for (const pred of predictions) {
+        try {
+          const predictionData = JSON.parse(pred.prediction_data);
+          const modelEmoji = pred.model_used === "gpt" ? "🧠" : "🤖";
+          const modelName = pred.model_used === "gpt" ? "GPT-4" : "Claude";
+          const cardType = pred.card_type === "main" ? "Main Card" : "Prelims";
+
+          const fightResults = predictionData.fights
+            .map((fight) => {
+              const matchingResult = scrapedResults.find(
+                (r) =>
+                  (r.winner === fight.fighter1?.trim() &&
+                    r.loser === fight.fighter2?.trim()) ||
+                  (r.winner === fight.fighter2?.trim() &&
+                    r.loser === fight.fighter1?.trim())
+              );
+
+              if (!matchingResult) return null;
+
+              return {
+                fighters: `${fight.fighter1} vs ${fight.fighter2}`,
+                prediction: {
+                  winner: fight.predictedWinner,
+                  method: fight.method,
+                  confidence: fight.confidence,
+                },
+                actual: {
+                  winner: matchingResult.winner,
+                  method: matchingResult.method,
+                },
+                isCorrect:
+                  fight.predictedWinner?.trim() === matchingResult.winner,
+                isMethodCorrect: matchingResult.method
+                  ?.toLowerCase()
+                  .includes(fight.method?.toLowerCase() || ""),
+              };
+            })
+            .filter(Boolean);
+
+          const correctCount = fightResults.filter((f) => f.isCorrect).length;
+
+          embed.addFields({
+            name: `${modelEmoji} ${modelName} - ${cardType} (${correctCount}/${fightResults.length} correct)`,
+            value:
+              fightResults
+                .map((fight) => {
+                  const resultEmoji = fight.isCorrect ? "✅" : "❌";
+                  const methodEmoji = fight.isMethodCorrect ? "🎯" : "📌";
+                  return [
+                    `${resultEmoji} ${fight.fighters}`,
+                    `└ Predicted: ${fight.prediction.winner} by ${fight.prediction.method} (${fight.prediction.confidence}%)`,
+                    `└ Actual: ${fight.actual.winner} by ${fight.actual.method}`,
+                  ].join("\n");
+                })
+                .join("\n\n") || "No verified fights found",
+            inline: false,
+          });
+        } catch (error) {
+          console.error("Error processing prediction:", error);
+          continue;
+        }
+      }
+
+      await interaction.editReply({
+        embeds: [embed],
+        files: [
+          {
+            attachment: "./src/images/FightGenie_Logo_1.PNG",
+            name: "FightGenie_Logo_1.PNG",
+          },
+        ],
+      });
+    } catch (error) {
+      console.error("Error handling historical view:", error);
+      await interaction.editReply("Error retrieving historical predictions");
+    }
+  }
+
+  static async processDetailedFightResults(predictions, actualResults) {
+    return predictions
+      .map((fight) => {
+        const matchingResult = actualResults.find(
+          (r) =>
+            (r.winner === fight.fighter1?.trim() &&
+              r.loser === fight.fighter2?.trim()) ||
+            (r.winner === fight.fighter2?.trim() &&
+              r.loser === fight.fighter1?.trim())
+        );
+
+        if (!matchingResult) return null;
+
+        return {
+          fighters: `${fight.fighter1} vs ${fight.fighter2}`,
+          prediction: {
+            winner: fight.predictedWinner,
+            method: fight.method,
+            confidence: fight.confidence,
+          },
+          actual: {
+            winner: matchingResult.winner,
+            method: matchingResult.method,
+          },
+          isCorrect: fight.predictedWinner?.trim() === matchingResult.winner,
+          isMethodCorrect: matchingResult.method
+            ?.toLowerCase()
+            .includes(fight.method?.toLowerCase() || ""),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  static async scrapeEventResults(eventLink) {
+    try {
+      if (!eventLink) return null;
+
+      console.log(`Scraping results from: ${eventLink}`);
+      const response = await axios.get(eventLink);
+      const $ = cheerio.load(response.data);
+      const results = [];
+
+      $(".b-fight-details__table-body tr").each((_, row) => {
+        try {
+          const $row = $(row);
+          const fighters = $row.find(".b-link.b-link_style_black");
+          const methodText = $row
+            .find('.b-fight-details__table-text:contains("Won by")')
+            .next()
+            .text()
+            .trim();
+
+          if (fighters.length >= 2) {
+            const winner = $(fighters[0]).text().trim();
+            const loser = $(fighters[1]).text().trim();
+
+            if (winner && loser) {
+              results.push({
+                winner,
+                loser,
+                method: methodText || "Decision",
+              });
+            }
+          }
+        } catch (innerError) {
+          console.error("Error processing fight row:", innerError);
+        }
+      });
+
+      return results;
+    } catch (error) {
+      console.error("Error scraping event results:", error);
+      return null;
+    }
+  }
 }
 
 module.exports = ModelStatsCommand;
