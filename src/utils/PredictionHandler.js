@@ -921,6 +921,7 @@ static async getPredictionStats(model = null) {
 
 static async generateNewPredictions(interaction, event, cardType, model) {
   try {
+    await OddsAnalysis.cacheEventOdds(event.event_id, fights);
       const loadingEmbed = new EmbedBuilder()
           .setColor("#ffff00")
           .setTitle("🤖 Fight Genie Analysis in Progress")

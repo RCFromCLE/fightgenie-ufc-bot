@@ -4,53 +4,68 @@ const database = require('../database');
 class PayPalService {
     static API_BASE = process.env.NODE_ENV === 'production' 
     ? 'https://api-m.paypal.com'
-    : 'https://api.sandbox.paypal.com';
-
-static CHECKOUT_BASE = process.env.NODE_ENV === 'production'
-    ? 'https://www.paypal.com'
-    : 'https://www.sandbox.paypal.com';
+    : 'https://api-m.sandbox.paypal.com';
 
 static async getAccessToken() {
     try {
+        if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
+            throw new Error('PayPal credentials not configured');
+        }
+
+        // Create base64 encoded credentials - matching your working PowerShell script
         const auth = Buffer.from(
-            `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+            `${process.env.PAYPAL_CLIENT_ID.trim()}:${process.env.PAYPAL_CLIENT_SECRET.trim()}`
         ).toString('base64');
 
         console.log('Getting PayPal access token...');
         const response = await axios({
             method: 'post',
-            url: `${PayPalService.API_BASE}/v1/oauth2/token`,
-            data: 'grant_type=client_credentials',
+            url: `${this.API_BASE}/v1/oauth2/token`,
             headers: {
                 'Authorization': `Basic ${auth}`,
+                'Accept': 'application/json',
+                'Accept-Language': 'en_US',
                 'Content-Type': 'application/x-www-form-urlencoded'
-            }
+            },
+            data: 'grant_type=client_credentials'
         });
 
-        console.log('Access token received');
+        if (!response.data?.access_token) {
+            throw new Error('No access token received from PayPal');
+        }
+
+        console.log('Access token received successfully');
         return response.data.access_token;
     } catch (error) {
-        console.error('PayPal Auth Error:', error.response?.data || error);
-        throw new Error('Failed to authenticate with PayPal');
+        console.error('PayPal Auth Error:', {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status
+        });
+        throw error;
     }
 }
 
 static async createPaymentOrder(userId, serverId, amount, paymentType) {
     try {
-        const accessToken = await PayPalService.getAccessToken();
+        const accessToken = await this.getAccessToken();
+        
         const orderData = {
             intent: "CAPTURE",
             purchase_units: [{
+                reference_id: `${userId}-${serverId}`,
                 amount: {
                     currency_code: "USD",
                     value: amount.toFixed(2)
                 },
-                description: 'Fight Genie Server Access',
+                description: paymentType === 'SERVER_LIFETIME' ? 
+                    'Fight Genie Lifetime Server Access' : 
+                    'Fight Genie Event Access',
                 custom_id: `${userId}:${serverId}:${paymentType}`
             }],
             application_context: {
                 brand_name: 'Fight Genie',
-                landing_page: 'BILLING',  // Changed from LOGIN to BILLING
+                landing_page: 'NO_PREFERENCE',
                 user_action: 'PAY_NOW',
                 return_url: 'https://discord.com/channels/@me',
                 cancel_url: 'https://discord.com/channels/@me'
@@ -69,11 +84,10 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
             }
         );
 
-        // Find the approve link with payment flow
+        // Find the approve link
         const approveLink = response.data.links.find(link => 
-            link.rel === "payer-action" || // Look for payer-action first
-            link.rel === "approve" ||      // Fallback to approve
-            link.href.includes("/checkout/") // Final fallback
+            link.rel === "approve" || 
+            link.rel === "payer-action"
         )?.href;
 
         if (!approveLink) {
@@ -91,62 +105,24 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
 
         return {
             orderId: response.data.id,
-            approveLink: approveLink
+            approveLink
         };
     } catch (error) {
-        console.error('PayPal Order Error:', error.response?.data || error);
-        throw error;
-    }
-}
-
-static createCheckoutUrl(orderId) {
-    const baseUrl = this.API_BASE === 'https://api-m.paypal.com' 
-        ? 'https://www.paypal.com' 
-        : 'https://www.sandbox.paypal.com';
-    return `${baseUrl}/checkoutnow?token=${orderId}`;
-}
-
-static async storeOrderDetails(orderId, details) {
-    try {
-        if (!details.serverId || !details.userId) {
-            throw new Error('Missing required server or user ID for order storage');
-        }
-
-        await database.query(`
-            INSERT INTO payment_logs (
-                payment_id,
-                server_id,
-                admin_id,
-                payment_type,
-                amount,
-                status,
-                provider,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `, [
-            orderId,
-            details.serverId,
-            details.userId,
-            details.payment_type,
-            details.amount,
-            details.status,
-            'PAYPAL'
-        ]);
-
-        console.log('Stored order details:', {
-            orderId,
-            serverId: details.serverId,
-            userId: details.userId,
-            status: details.status
+        console.error('PayPal Order Creation Error:', {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status
         });
-    } catch (error) {
-        console.error('Error storing order details:', error);
         throw error;
     }
 }
 
     static async storeOrderDetails(orderId, details) {
         try {
+            if (!details.serverId || !details.userId) {
+                throw new Error('Missing required server or user ID for order storage');
+            }
+    
             await database.query(`
                 INSERT INTO payment_logs (
                     payment_id,
@@ -167,7 +143,7 @@ static async storeOrderDetails(orderId, details) {
                 details.status,
                 'PAYPAL'
             ]);
-
+    
             console.log('Stored order details:', {
                 orderId,
                 serverId: details.serverId,
@@ -179,61 +155,70 @@ static async storeOrderDetails(orderId, details) {
             throw error;
         }
     }
-
-// In PayPalService.js
-
-static async verifyPayment(orderId) {
-    try {
-        const accessToken = await PayPalService.getAccessToken();
-        
-        console.log(`Verifying payment for order: ${orderId}`);
-        const orderResponse = await axios.get(
-            `${PayPalService.API_BASE}/v2/checkout/orders/${orderId}`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
+    static async verifyPayment(orderId) {
+        try {
+            const accessToken = await this.getAccessToken();
+            
+            console.log(`Verifying payment for order: ${orderId}`);
+            const response = await axios.get(
+                `${this.API_BASE}/v2/checkout/orders/${orderId}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
                 }
+            );
+
+            const status = response.data.status;
+            console.log('Order status:', status);
+
+            if (status === 'COMPLETED') {
+                return await this.processCompletedPayment(response.data);
             }
-        );
 
-        console.log('Order status:', orderResponse.data.status);
+            if (status === 'APPROVED') {
+                return await this.captureApprovedPayment(orderId, accessToken);
+            }
 
-        if (orderResponse.data.status === 'CREATED') {
-            const checkoutUrl = `${PayPalService.CHECKOUT_BASE}/checkoutnow?token=${orderId}`;
             return {
                 success: false,
-                status: 'PENDING_PAYMENT',
-                message: 'Payment not yet completed. Please complete payment through PayPal.',
-                checkoutUrl
+                status: status,
+                message: `Payment needs to be completed. Current status: ${status}`
+            };
+
+        } catch (error) {
+            console.error('Payment verification error:', error);
+            return {
+                success: false,
+                status: 'ERROR',
+                message: 'Error verifying payment. Please try again.',
+                error: error.message
             };
         }
-
-        if (orderResponse.data.status === 'COMPLETED') {
-            const purchaseUnit = orderResponse.data.purchase_units[0];
+    }
+    
+    static async processCompletedPayment(orderData) {
+        try {
+            const purchaseUnit = orderData.purchase_units[0];
             
-            // Add defensive checks for custom_id
-            let userId, serverId;
+            let userId, serverId, paymentType;
             try {
-                if (purchaseUnit && purchaseUnit.custom_id) {
-                    [userId, serverId] = purchaseUnit.custom_id.split(':');
-                } else if (purchaseUnit && purchaseUnit.custom) {
-                    // Fallback to check purchaseUnit.custom if custom_id doesn't exist
-                    [userId, serverId] = purchaseUnit.custom.split(':');
+                if (purchaseUnit?.custom_id) {
+                    [userId, serverId, paymentType] = purchaseUnit.custom_id.split(':');
+                } else if (purchaseUnit?.custom) {
+                    [userId, serverId, paymentType] = purchaseUnit.custom.split(':');
                 }
                 
                 if (!userId || !serverId) {
-                    console.log('Purchase unit data:', purchaseUnit);
-                    throw new Error('Missing user or server ID in PayPal response');
+                    throw new Error('Invalid payment data format');
                 }
             } catch (parseError) {
                 console.error('Error parsing custom_id:', parseError);
-                console.log('Full purchase unit:', purchaseUnit);
-                
-                // Return a more graceful error response
                 return {
                     success: false,
-                    status: 'ERROR',
-                    message: 'Error processing payment verification. Please contact support.',
+                    status: 'INVALID_DATA',
+                    message: 'Error processing payment data. Please contact support.',
                     error: 'Invalid payment data format'
                 };
             }
@@ -243,131 +228,93 @@ static async verifyPayment(orderId) {
                 SET status = 'COMPLETED', 
                     updated_at = datetime('now') 
                 WHERE payment_id = ?
-            `, [orderId]);
+            `, [orderData.id]);
 
             return {
                 success: true,
+                status: 'COMPLETED',
                 userId,
                 serverId,
-                amount: purchaseUnit.amount.value,
-                status: 'COMPLETED'
+                paymentType,
+                amount: purchaseUnit.amount.value
             };
+        } catch (error) {
+            console.error('Error processing completed payment:', error);
+            throw error;
         }
-
-        if (orderResponse.data.status === 'APPROVED') {
-            try {
-                const captureResponse = await axios.post(
-                    `${PayPalService.API_BASE}/v2/checkout/orders/${orderId}/capture`,
-                    {},
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Content-Type': 'application/json',
-                            'PayPal-Request-Id': `FG-CAPTURE-${Date.now()}-${Math.random().toString(36).substring(7)}`
-                        }
-                    }
-                );
-
-                if (captureResponse.data.status === 'COMPLETED') {
-                    const purchaseUnit = captureResponse.data.purchase_units[0];
-                    
-                    // Add the same defensive checks here
-                    let userId, serverId;
-                    try {
-                        if (purchaseUnit && purchaseUnit.custom_id) {
-                            [userId, serverId] = purchaseUnit.custom_id.split(':');
-                        } else if (purchaseUnit && purchaseUnit.custom) {
-                            [userId, serverId] = purchaseUnit.custom.split(':');
-                        }
-                        
-                        if (!userId || !serverId) {
-                            console.log('Capture response purchase unit:', purchaseUnit);
-                            throw new Error('Missing user or server ID in capture response');
-                        }
-                    } catch (parseError) {
-                        console.error('Error parsing custom_id from capture:', parseError);
-                        console.log('Full capture purchase unit:', purchaseUnit);
-                        return {
-                            success: false,
-                            status: 'ERROR',
-                            message: 'Error processing payment capture. Please contact support.',
-                            error: 'Invalid capture data format'
-                        };
-                    }
-
-                    await database.query(`
-                        UPDATE payment_logs 
-                        SET status = 'COMPLETED', 
-                            updated_at = datetime('now') 
-                        WHERE payment_id = ?
-                    `, [orderId]);
-
-                    return {
-                        success: true,
-                        userId,
-                        serverId,
-                        amount: purchaseUnit.amount.value,
-                        status: 'COMPLETED'
-                    };
-                }
-            } catch (captureError) {
-                console.error('Payment capture error:', captureError.response?.data || captureError);
-                return {
-                    success: false,
-                    status: 'ERROR',
-                    message: 'Error capturing payment. Please try again or contact support.',
-                    error: captureError.message
-                };
-            }
-        }
-
-        return {
-            success: false,
-            status: orderResponse.data.status,
-            message: `Payment needs to be completed. Current status: ${orderResponse.data.status}`
-        };
-
-    } catch (error) {
-        console.error('Payment Verification Error:', error.response?.data || error);
-        return {
-            success: false,
-            error: error.response?.status === 404 
-                ? 'Payment not found. Please ensure you completed the PayPal checkout.'
-                : 'Error verifying payment. Please try again or contact support.',
-            details: error.message
-        };
     }
-}
 
-static async getOrderDetails(orderId) {
-    try {
-        const accessToken = await this.getAccessToken();
-        const response = await axios.get(
-            `${this.API_BASE}/v2/checkout/orders/${orderId}`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`
-                }
-            }
-        );
-        return response.data;
-    } catch (error) {
-        console.error('Error getting order details:', error);
-        throw error;
-    }
-}
-
-    static async capturePayment(orderId) {
+    static async captureApprovedPayment(orderId, accessToken) {
         try {
-            const accessToken = await PayPalService.getAccessToken();
-            const response = await axios.post(
-                `${PayPalService.API_BASE}/v2/checkout/orders/${orderId}/capture`,
+            const captureResponse = await axios.post(
+                `${this.API_BASE}/v2/checkout/orders/${orderId}/capture`,
                 {},
                 {
                     headers: {
                         'Authorization': `Bearer ${accessToken}`,
                         'Content-Type': 'application/json',
-                        'PayPal-Request-Id': `FG-CAPTURE-${Date.now()}-${Math.random().toString(36).substring(7)}`
+                        'Accept': 'application/json',
+                        'Accept-Language': 'en_US',
+                        'PayPal-Request-Id': `FG-CAPTURE-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+                        'Prefer': 'return=representation'
+                    }
+                }
+            );
+
+            if (captureResponse.data.status === 'COMPLETED') {
+                return await this.processCompletedPayment(captureResponse.data);
+            }
+
+            return {
+                success: false,
+                status: captureResponse.data.status,
+                message: `Payment capture status: ${captureResponse.data.status}. Please try again.`
+            };
+        } catch (error) {
+            console.error('Payment capture error:', error);
+            return {
+                success: false,
+                status: 'CAPTURE_ERROR',
+                message: 'Error capturing payment. Please try again or contact support.',
+                error: error.message
+            };
+        }
+    }
+
+    static async getOrderDetails(orderId) {
+        try {
+            const accessToken = await this.getAccessToken();
+            const response = await axios.get(
+                `${this.API_BASE}/v2/checkout/orders/${orderId}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Accept': 'application/json',
+                        'Accept-Language': 'en_US'
+                    }
+                }
+            );
+            return response.data;
+        } catch (error) {
+            console.error('Error getting order details:', error);
+            throw error;
+        }
+    }
+
+    static async capturePayment(orderId) {
+        try {
+            const accessToken = await PayPalService.getAccessToken();
+            const response = await axios.post(
+                `${this.API_BASE}/v2/checkout/orders/${orderId}/capture`,
+                {},
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Accept-Language': 'en_US',
+                        'PayPal-Request-Id': `FG-CAPTURE-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+                        'Prefer': 'return=representation'
                     }
                 }
             );
@@ -379,5 +326,4 @@ static async getOrderDetails(orderId) {
     }
 }
 
-// Export the service
 module.exports = PayPalService;
