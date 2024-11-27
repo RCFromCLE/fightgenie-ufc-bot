@@ -8,6 +8,7 @@ const database = require("../database");
 const ModelCommand = require("../commands/ModelCommand");
 const { generateEnhancedPredictionsWithAI } = require("./llmhelper");
 const FighterStats = require("./fighterStats");
+const OddsAnalysis = require("./OddsAnalysis");
 
 class PredictionHandler {
   static async getUpcomingEvent() {
@@ -921,116 +922,118 @@ static async getPredictionStats(model = null) {
 
 static async generateNewPredictions(interaction, event, cardType, model) {
   try {
+    const loadingEmbed = new EmbedBuilder()
+      .setColor("#ffff00")
+      .setTitle("🤖 Fight Genie Analysis in Progress")
+      .setDescription(
+        [
+          `Analyzing ${cardType === "main" ? "Main Card" : "Preliminary Card"} fights for ${event.Event}`,
+          "**Processing:**",
+          "• Gathering fighter statistics and historical data",
+          "• Analyzing style matchups and recent performance",
+          "• Calculating win probabilities and confidence levels",
+          "• Generating parlay and prop recommendations",
+          "",
+          `Using ${model.toUpperCase() === "GPT" ? "GPT-4" : "Claude"} for enhanced fight analysis...`
+        ].join("\n")
+      );
+
+    await interaction.editReply({ embeds: [loadingEmbed] });
+
+    // Get fights based on card type first
+    const fights = cardType === "main"
+      ? await this.getMainCardFights(event.Event)
+      : await this.getPrelimFights(event.Event);
+
+    if (!fights || fights.length === 0) {
+      throw new Error(`No fights found for ${cardType} card`);
+    }
+
+    // Now we can cache the odds since fights is defined
     await OddsAnalysis.cacheEventOdds(event.event_id, fights);
-      const loadingEmbed = new EmbedBuilder()
-          .setColor("#ffff00")
-          .setTitle("🤖 Fight Genie Analysis in Progress")
-          .setDescription(
-              [
-                  `Analyzing ${cardType === "main" ? "Main Card" : "Preliminary Card"} fights for ${event.Event}`,
-                  "**Processing:**",
-                  "• Gathering fighter statistics and historical data",
-                  "• Analyzing style matchups and recent performance",
-                  "• Calculating win probabilities and confidence levels",
-                  "• Generating parlay and prop recommendations",
-                  "",
-                  `Using ${model.toUpperCase() === "GPT" ? "GPT-4" : "Claude"} for enhanced fight analysis...`
-              ].join("\n")
-          );
 
-      await interaction.editReply({ embeds: [loadingEmbed] });
+    console.log(`Processing ${fights.length} fights for ${cardType} card:`,
+      fights.map(f => `${f.fighter1} vs ${f.fighter2}`));
 
-      // Get fights based on card type
-      const fights = cardType === "main"
-          ? await this.getMainCardFights(event.Event)
-          : await this.getPrelimFights(event.Event);
+    // Process fights in batches
+    const maxBatchSize = 3;
+    const predictions = [];
+    let bettingAnalysis = null;
 
-      if (!fights || fights.length === 0) {
-          throw new Error(`No fights found for ${cardType} card`);
-      }
-
-      console.log(`Processing ${fights.length} fights for ${cardType} card:`, 
-          fights.map(f => `${f.fighter1} vs ${f.fighter2}`));
-
-      // Process fights in batches
-      const maxBatchSize = 3;
-      const predictions = [];
-      let bettingAnalysis = null;
-
-      for (let i = 0; i < fights.length; i += maxBatchSize) {
-          const batch = fights.slice(i, i + maxBatchSize);
-          console.log(`Processing batch ${Math.floor(i / maxBatchSize) + 1} of ${Math.ceil(fights.length / maxBatchSize)}`);
-
-          try {
-              const batchPredictions = await generateEnhancedPredictionsWithAI(batch, event, model);
-
-              if (batchPredictions && Array.isArray(batchPredictions.fights)) {
-                  predictions.push(...batchPredictions.fights);
-                  
-                  // Keep betting analysis from final batch
-                  if (i + maxBatchSize >= fights.length) {
-                      bettingAnalysis = batchPredictions.betting_analysis;
-                  }
-              } else {
-                  console.error("Invalid batch predictions format:", batchPredictions);
+    for (let i = 0; i < fights.length; i += maxBatchSize) {
+      const batch = fights.slice(i, i + maxBatchSize);
+      console.log(`Processing batch ${Math.floor(i / maxBatchSize) + 1} of ${Math.ceil(fights.length / maxBatchSize)}`);
+  
+      try {
+          // Pass the batch directly rather than accessing fights variable
+          const batchPredictions = await generateEnhancedPredictionsWithAI(batch, event, model);
+  
+          if (batchPredictions && Array.isArray(batchPredictions.fights)) {
+              predictions.push(...batchPredictions.fights);
+              
+              // Keep betting analysis from final batch
+              if (i + maxBatchSize >= fights.length) {
+                  bettingAnalysis = batchPredictions.betting_analysis;
               }
-          } catch (batchError) {
-              console.error(`Error processing batch ${Math.floor(i / maxBatchSize) + 1}:`, batchError);
+          } else {
+              console.error("Invalid batch predictions format:", batchPredictions);
           }
-
-          // Add delay between batches
-          if (i + maxBatchSize < fights.length) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+      } catch (batchError) {
+          console.error(`Error processing batch ${Math.floor(i / maxBatchSize) + 1}:`, batchError);
       }
-
-      // Validate we have predictions for all fights
-      if (predictions.length === 0) {
-          throw new Error("No valid predictions generated");
+  
+      if (i + maxBatchSize < fights.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
       }
+  }
+  
+    // Validate we have predictions for all fights
+    if (predictions.length === 0) {
+      throw new Error("No valid predictions generated");
+    }
 
-      // Create prediction data structure
-      const predictionData = {
-          fights: predictions,
-          betting_analysis: bettingAnalysis || {
-              upsets: "Unable to generate detailed analysis at this time.",
-              parlays: "Unable to generate parlay suggestions at this time.",
-              method_props: "Unable to generate method props at this time.",
-              round_props: "Unable to generate round props at this time.",
-              special_props: "Unable to generate special props at this time."
-          }
-      };
+    // Create prediction data structure
+    const predictionData = {
+      fights: predictions,
+      betting_analysis: bettingAnalysis || {
+        upsets: "Unable to generate detailed analysis at this time.",
+        parlays: "Unable to generate parlay suggestions at this time.",
+        method_props: "Unable to generate method props at this time.",
+        round_props: "Unable to generate round props at this time.",
+        special_props: "Unable to generate special props at this time."
+      }
+    };
 
-      // Store predictions in database
-      await this.storePredictions(event.event_id, cardType, model, predictionData);
+    // Store predictions in database
+    await this.storePredictions(event.event_id, cardType, model, predictionData);
 
-      // Display predictions
-      await this.displayPredictions(interaction, predictionData, event, model, cardType);
+    // Display predictions
+    await this.displayPredictions(interaction, predictionData, event, model, cardType);
 
   } catch (error) {
-      console.error("Error generating new predictions:", error);
-      
-      // Send error message to user
-      const errorEmbed = new EmbedBuilder()
-          .setColor("#ff0000")
-          .setTitle("❌ Error Generating Predictions")
-          .setDescription([
-              "An error occurred while generating predictions.",
-              "",
-              "This can happen if:",
-              "• Fighter data is missing or incomplete",
-              "• The AI model is temporarily unavailable",
-              "• There are connection issues",
-              "",
-              "Please try again in a few moments."
-          ].join("\n"));
+    console.error("Error generating new predictions:", error);
+    
+    // Send error message to user
+    const errorEmbed = new EmbedBuilder()
+      .setColor("#ff0000")
+      .setTitle("❌ Error Generating Predictions")
+      .setDescription([
+        "An error occurred while generating predictions.",
+        "",
+        "This can happen if:",
+        "• Fighter data is missing or incomplete",
+        "• The AI model is temporarily unavailable",
+        "• There are connection issues",
+        "",
+        "Please try again in a few moments."
+      ].join("\n"));
 
-      await interaction.editReply({
-          embeds: [errorEmbed],
-          components: []
-      });
+    await interaction.editReply({
+      embeds: [errorEmbed],
+      components: []
+    });
 
-      throw new Error("Failed to generate valid predictions");
+    throw new Error("Failed to generate valid predictions");
   }
 }
 

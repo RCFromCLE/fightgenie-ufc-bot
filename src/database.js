@@ -1032,97 +1032,122 @@ async verifyAccess(serverId, eventId = null) {
 
   async getEventFights(eventName) {
     try {
-      // First try to get existing fights
-      let fights = await this.query(
-        `
-              SELECT
-                  event_id,
-                  Winner as fighter1,
-                  Loser as fighter2,
-                  WeightClass,
-                  Round,
-                  Method,
-                  is_main_card
-              FROM events
-              WHERE Event = ?
-              ORDER BY event_id ASC
-              `,
-        [eventName]
-      );
+        let fights = await this.query(`
+            SELECT
+                event_id,
+                COALESCE(fighter1, Winner) as fighter1,
+                COALESCE(fighter2, Loser) as fighter2,
+                WeightClass,
+                Round,
+                Method,
+                is_main_card,
+                Date
+            FROM events
+            WHERE Event = ?
+            ORDER BY event_id ASC`,
+            [eventName]
+        );
 
-      // If no fights found or less than expected, scrape fresh data
-      if (!fights || fights.length < 6) {
-        console.log("Insufficient fights found, scraping fresh data...");
-        const scrapedEvent = await this.scrapeUpcomingEvent();
+        // If no fighter names found, try to scrape fresh data
+        if (fights.every(fight => !fight.fighter1 || !fight.fighter2)) {
+            console.log("No fighter names found, scraping fresh data...");
+            const scrapedEvent = await this.scrapeUpcomingEvent();
 
-        // Insert all scraped fights
-        for (const fight of scrapedEvent.fights) {
-          await this.insertEventFight(scrapedEvent, fight);
+            // Update existing fights with fighter names
+            if (scrapedEvent && scrapedEvent.fights) {
+                for (let i = 0; i < Math.min(fights.length, scrapedEvent.fights.length); i++) {
+                    await this.query(`
+                        UPDATE events 
+                        SET fighter1 = ?, fighter2 = ?
+                        WHERE event_id = ?`,
+                        [
+                            scrapedEvent.fights[i].fighter1,
+                            scrapedEvent.fights[i].fighter2,
+                            fights[i].event_id
+                        ]
+                    );
+                }
+
+                // Get updated fights data
+                fights = await this.query(`
+                    SELECT
+                        event_id,
+                        COALESCE(fighter1, Winner) as fighter1,
+                        COALESCE(fighter2, Loser) as fighter2,
+                        WeightClass,
+                        Round,
+                        Method,
+                        is_main_card,
+                        Date
+                    FROM events
+                    WHERE Event = ?
+                    ORDER BY event_id ASC`,
+                    [eventName]
+                );
+            }
         }
 
-        // Get updated fights list
-        fights = await this.query(
-          `
-                  SELECT
-                      event_id,
-                      Winner as fighter1,
-                      Loser as fighter2,
-                      WeightClass,
-                      Round,
-                      Method,
-                      is_main_card
-                  FROM events
-                  WHERE Event = ?
-                  ORDER BY event_id ASC
-                  `,
-          [eventName]
-        );
-      }
-
-      console.log(
-        `Retrieved ${fights.length} fights from database:`,
-        JSON.stringify(fights, null, 2)
-      );
-      return fights;
+        console.log(`Retrieved ${fights.length} fights from database:`, 
+            JSON.stringify(fights, null, 2));
+        return fights;
     } catch (error) {
-      console.error("Error getting event fights:", error);
-      throw error;
+        console.error("Error getting event fights:", error);
+        throw error;
     }
-  }
+}
 
-  async insertEventFight(event, fight) {
-    const query = `
-          INSERT INTO events (
-              Date, Event, City, State, Country,
-              Winner, Loser, WeightClass, Round, Method,
-              event_link, is_main_card
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-    try {
-      await this.query(query, [
-        event.Date,
-        event.Event,
-        event.City,
-        event.State,
-        event.Country,
-        fight.fighter1,
-        fight.fighter2,
-        fight.WeightClass,
-        fight.Round || null,
-        fight.Method || null,
-        event.event_link,
-        fight.is_main_card,
-      ]);
-      console.log(
-        `Inserted fight: ${fight.fighter1} vs ${fight.fighter2} (${
-          fight.is_main_card ? "Main Card" : "Prelims"
-        })`
-      );
-    } catch (error) {
+async insertEventFight(event, fight) {
+  try {
+      const isUpcomingEvent = new Date(event.Date) > new Date();
+      
+      if (isUpcomingEvent) {
+          // For upcoming events, use fighter1/fighter2
+          await this.query(`
+              INSERT INTO events (
+                  Date, Event, City, State, Country,
+                  fighter1, fighter2, WeightClass,
+                  event_link, is_main_card
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+              event.Date,
+              event.Event,
+              event.City,
+              event.State, 
+              event.Country,
+              fight.fighter1,
+              fight.fighter2,
+              fight.WeightClass,
+              event.event_link,
+              fight.is_main_card
+          ]);
+      } else {
+          // For past events, use Winner/Loser
+          await this.query(`
+              INSERT INTO events (
+                  Date, Event, City, State, Country,
+                  Winner, Loser, WeightClass, Round, Method,
+                  event_link, is_main_card
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+              event.Date,
+              event.Event,
+              event.City,
+              event.State,
+              event.Country,
+              fight.fighter1,
+              fight.fighter2,
+              fight.WeightClass,
+              fight.Round,
+              fight.Method,
+              event.event_link,
+              fight.is_main_card
+          ]);
+      }
+  } catch (error) {
       console.error("Error inserting fight:", error);
       throw error;
-    }
   }
+}
 
   async clearExistingFights(eventName) {
     const query = "DELETE FROM events WHERE Event = ?";

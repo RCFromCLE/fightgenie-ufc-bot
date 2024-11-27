@@ -17,35 +17,21 @@ const {
 } = require("discord.js");
 
 const EventHandlers = require("./src/utils/eventHandlers");
-
 const PredictCommand = require("./src/commands/predict");
-
 const ModelCommand = require("./src/commands/ModelCommand");
-
 const ModelStatsCommand = require("./src/commands/ModelStatsCommand");
-
 const CheckStatsCommand = require("./src/commands/CheckStatsCommand");
-
 const database = require("./src/database");
-
 const FighterStats = require("./src/utils/fighterStats");
-
 const DataValidator = require("./src/utils/DataValidator");
-
 const PredictionHandler = require("./src/utils/PredictionHandler");
-
 const PaymentCommand = require("./src/commands/PaymentCommand");
-
 const PaymentHandler = require("./src/utils/PaymentHandler");
-
 const OddsAnalysis = require("./src/utils/OddsAnalysis");
-
 const StatsDisplayHandler = require("./src/utils/StatsDisplayHandler");
-
 const AdminLogger = require("./src/utils/AdminLogger");
-
 const AdminEventCommand = require("./src/commands/AdminEventCommand");
-
+const PromoCommand = require('./src/commands/PromoCommand');
 const COMMAND_PREFIX = "$";
 
 // const ALLOWED_CHANNEL_ID = "1300201044730445864";
@@ -60,26 +46,60 @@ require("dotenv").config();
 
 function checkEnvironmentVariables() {
   const requiredVars = [
+    // Discord Configuration
     "DISCORD_TOKEN",
-
+    "DISCORD_CLIENT_ID",
+    
+    // API Keys
     "ANTHROPIC_API_KEY",
-
     "OPENAI_API_KEY",
-
+    "ODDS_API_KEY",
+    
+    // Database Configuration
+    "DB_PATH",
+    
+    // Server Configuration
+    "PORT",
+    
+    // Environment
+    "NODE_ENV",
+    
+    // Bot Configuration
+    "LOG_LEVEL",
+    "COMMAND_PREFIX",
+    
+    // PayPal Configuration
     "PAYPAL_CLIENT_ID",
-
     "PAYPAL_CLIENT_SECRET",
+    
+    // Solana Configuration
+    "SOLANA_RPC_URL",
+    "SOLANA_MERCHANT_WALLET"
+
   ];
 
   const missing = requiredVars.filter((varName) => !process.env[varName]);
-
+  
+  // Optional variables can be checked separately
+  const optionalVars = ["ALLOWED_CHANNEL_ID"];
+  const missingOptional = optionalVars.filter((varName) => !process.env[varName]);
+  
   if (missing.length > 0) {
-    console.error(
-      `Missing required environment variables: ${missing.join(", ")}`
-    );
-
+    console.error(`Missing required environment variables: ${missing.join(", ")}`);
     process.exit(1);
   }
+  
+  if (missingOptional.length > 0) {
+    console.warn(`Missing optional environment variables: ${missingOptional.join(", ")}`);
+  }
+  
+  // Additional validation for specific environments
+  if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'production') {
+    console.error('NODE_ENV must be either "development" or "production"');
+    process.exit(1);
+  }
+  
+  console.log('Environment variables validation completed successfully');
 }
 
 checkEnvironmentVariables();
@@ -161,171 +181,179 @@ client.on("messageCreate", async (message) => {
   const freeCommands = ["help", "buy"];
 
   try {
-    if (!freeCommands.includes(command)) {
-      const event = await database.getCurrentEvent();
-      const hasAccess = await checkAccess(message.guild.id, event?.event_id);
-
-      if (!hasAccess) {
-        const embed = new EmbedBuilder()
-          .setColor("#ff0000")
-          .setTitle("Server Access Required")
-          .setDescription(
-            "This server needs to purchase access to use Fight Genie predictions."
-          )
-          .setAuthor({
-            name: "Fight Genie",
-            iconURL: "attachment://FightGenie_Logo_1.PNG",
-          })
-          .addFields({
-            name: "How to Purchase",
-            value:
-              "Use the `$buy` command to see our special lifetime access offer! Or swoop in for event access at $6.99 per event.",
-          });
-
-        await message.reply({
-          embeds: [embed],
-          files: [
-            {
-              attachment: "./src/images/FightGenie_Logo_1.PNG",
-              name: "FightGenie_Logo_1.PNG",
-            },
-          ],
-        });
-        return;
-      }
-    }
-
     switch (command) {
+      case "promo":
+        await PromoCommand.handlePromoCommand(message, args);
+        break;
+
+      case "checkpromos":
+        await PromoCommand.handleCheckPromos(message);
+        break;
+
+      case "createnewcodes":
+        await PromoCommand.handleCreateNextEventCodes(message);
+        break;
+
       case "buy":
         await PaymentCommand.handleBuyCommand(message);
         break;
 
-      case "upcoming":
-        await retryCommand(async () => {
-          const loadingEmbed = new EmbedBuilder()
-            .setColor("#ffff00")
-            .setTitle("Loading Upcoming Event Data")
-            .setDescription("Fetching upcoming event information...");
-
-          const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
-
-          try {
-            const event = await EventHandlers.getUpcomingEvent();
-            if (!event) {
-              await loadingMsg.edit({
-                content: "No upcoming events found.",
-                embeds: [],
+      default:
+        if (!freeCommands.includes(command)) {
+          const event = await database.getCurrentEvent();
+          const hasAccess = await checkAccess(message.guild.id, event?.event_id);
+          if (!hasAccess) {
+            const embed = new EmbedBuilder()
+              .setColor("#ff0000")
+              .setTitle("Server Access Required")
+              .setDescription(
+                "This server needs to purchase access to use Fight Genie predictions."
+              )
+              .setAuthor({
+                name: "Fight Genie",
+                iconURL: "attachment://FightGenie_Logo_1.PNG",
+              })
+              .addFields({
+                name: "How to Purchase",
+                value:
+                  "Use the `$buy` command to see our special lifetime access offer! Or swoop in for event access at $6.99 per event.",
               });
+            await message.reply({
+              embeds: [embed],
+              files: [
+                {
+                  attachment: "./src/images/FightGenie_Logo_1.PNG",
+                  name: "FightGenie_Logo_1.PNG",
+                },
+              ],
+            });
+            return;
+          }
+        }
+
+        switch (command) {
+          case "upcoming":
+            await retryCommand(async () => {
+              const loadingEmbed = new EmbedBuilder()
+                .setColor("#ffff00")
+                .setTitle("Loading Upcoming Event Data")
+                .setDescription("Fetching upcoming event information...");
+              const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
+
+              try {
+                const event = await EventHandlers.getUpcomingEvent();
+                if (!event) {
+                  await loadingMsg.edit({
+                    content: "No upcoming events found.",
+                    embeds: [],
+                  });
+                  return;
+                }
+
+                const response = await EventHandlers.createEventEmbed(event, false);
+
+                // Check access to determine if we should show the buy prompt
+                const hasAccess = await database.verifyAccess(
+                  message.guild.id,
+                  event.event_id
+                );
+
+                if (!hasAccess) {
+                  // Add a field to the embed prompting to buy
+                  response.embeds[0].addFields({
+                    name: "🔒 Access Required",
+                    value: [
+                      "Purchase Fight Genie access to see:",
+                      "• AI-powered fight predictions",
+                      "• Detailed fighter analysis",
+                      "• Betting insights and recommendations",
+                      "• Live odds integration",
+                      "",
+                      "Use `$buy` to see pricing options!",
+                    ].join("\n"),
+                    inline: false,
+                  });
+
+                  // Replace prediction buttons with buy button
+                  response.components = [
+                    new ActionRowBuilder().addComponents(
+                      new ButtonBuilder()
+                        .setCustomId("buy_server_access")
+                        .setLabel("Get Fight Genie Access")
+                        .setEmoji("🌟")
+                        .setStyle(ButtonStyle.Success)
+                    ),
+                  ];
+                }
+
+                await loadingMsg.edit(response);
+              } catch (error) {
+                console.error("Error creating upcoming event embed:", error);
+                await loadingMsg.edit({
+                  content: "Error loading upcoming event data. Please try again.",
+                  embeds: [],
+                });
+              }
+            });
+            break;
+
+          case "model":
+            await ModelCommand.handleModelCommand(message, args);
+            break;
+
+          case "advance":
+            if (message.guild?.id !== "496121279712329756") {
+              console.log(
+                `Unauthorized advance attempt from guild ${message.guild?.id}`
+              );
               return;
             }
-
-            const response = await EventHandlers.createEventEmbed(event, false);
-
-            // Check access to determine if we should show the buy prompt
-            const hasAccess = await database.verifyAccess(
-              message.guild.id,
-              event.event_id
-            );
-
-            if (!hasAccess) {
-              // Add a field to the embed prompting to buy
-              response.embeds[0].addFields({
-                name: "🔒 Access Required",
-                value: [
-                  "Purchase Fight Genie access to see:",
-                  "• AI-powered fight predictions",
-                  "• Detailed fighter analysis",
-                  "• Betting insights and recommendations",
-                  "• Live odds integration",
-                  "",
-                  "Use `$buy` to see pricing options!",
-                ].join("\n"),
-                inline: false,
-              });
-
-              // Replace prediction buttons with buy button
-              response.components = [
-                new ActionRowBuilder().addComponents(
-                  new ButtonBuilder()
-                    .setCustomId("buy_server_access")
-                    .setLabel("Get Fight Genie Access")
-                    .setEmoji("🌟")
-                    .setStyle(ButtonStyle.Success)
-                ),
-              ];
+            if (!message.member?.permissions.has("Administrator")) {
+              await message.reply(
+                "❌ This command requires administrator permissions."
+              );
+              return;
             }
+            await AdminEventCommand.handleAdvanceEvent(message);
+            break;
 
-            await loadingMsg.edit(response);
-          } catch (error) {
-            console.error("Error creating upcoming event embed:", error);
-            await loadingMsg.edit({
-              content: "Error loading upcoming event data. Please try again.",
-              embeds: [],
-            });
-          }
-        });
-        break;
+          case "forceupdate":
+            if (message.guild?.id !== "496121279712329756") {
+              console.log(
+                `Unauthorized forceupdate attempt from guild ${message.guild?.id}`
+              );
+              return;
+            }
+            if (!message.member?.permissions.has("Administrator")) {
+              await message.reply(
+                "❌ This command requires administrator permissions."
+              );
+              return;
+            }
+            await AdminEventCommand.forceUpdateCurrentEvent(message);
+            break;
 
-      case "model":
-        await ModelCommand.handleModelCommand(message, args);
+          case "checkstats":
+            await CheckStatsCommand.handleCheckStats(message, args);
+            break;
 
-        break;
+          case "stats":
+            await ModelStatsCommand.handleModelStatsCommand(message);
+            break;
 
-      case "advance":
-        if (message.guild?.id !== "496121279712329756") {
-          console.log(
-            `Unauthorized advance attempt from guild ${message.guild?.id}`
-          );
-          return;
+          case "help":
+            const helpEmbed = createHelpEmbed();
+            await message.reply({ embeds: [helpEmbed] });
+            break;
+
+          default:
+            await message.reply(
+              `Unknown command. Use ${COMMAND_PREFIX}help to see available commands.`
+            );
         }
-        if (!message.member?.permissions.has("Administrator")) {
-          await message.reply(
-            "❌ This command requires administrator permissions."
-          );
-          return;
-        }
-        await AdminEventCommand.handleAdvanceEvent(message);
-        break;
-
-      case "forceupdate":
-        if (message.guild?.id !== "496121279712329756") {
-          console.log(
-            `Unauthorized forceupdate attempt from guild ${message.guild?.id}`
-          );
-          return;
-        }
-        if (!message.member?.permissions.has("Administrator")) {
-          await message.reply(
-            "❌ This command requires administrator permissions."
-          );
-          return;
-        }
-        await AdminEventCommand.forceUpdateCurrentEvent(message);
-        break;
-      case "checkstats":
-        await CheckStatsCommand.handleCheckStats(message, args);
-
-        break;
-
-      case "stats":
-        await ModelStatsCommand.handleModelStatsCommand(message);
-        break;
-
-      case "help":
-        const helpEmbed = createHelpEmbed();
-
-        await message.reply({ embeds: [helpEmbed] });
-
-        break;
-
-      default:
-        await message.reply(
-          `Unknown command. Use ${COMMAND_PREFIX}help to see available commands.`
-        );
     }
   } catch (error) {
     console.error("Command error:", error);
-
     await message.reply(
       "An error occurred while processing your request. Please try again later."
     );
@@ -374,7 +402,6 @@ client.on("interactionCreate", async (interaction) => {
       // Check access for prediction-related buttons
       if (
         action === "predict" ||
-        action === "analysis" ||
         action === "betting"
       ) {
         const eventId = args[args.length - 1];
@@ -412,7 +439,10 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
       }
-
+      console.log("Button interaction:", {
+        action,
+        customId: interaction.customId
+      });
       switch (action) {
         case "buy":
           await PaymentHandler.handlePayment(interaction);
@@ -466,8 +496,16 @@ client.on("interactionCreate", async (interaction) => {
           if (args[0] === "analysis") {
             const eventId = args[1];
             await EventHandlers.displayBettingAnalysis(interaction, eventId);
-          }
-          break;
+          } else if (!args.length) {
+            // Handle direct betting_analysis button
+            const event = await EventHandlers.getUpcomingEvent();
+            await EventHandlers.displayBettingAnalysis(interaction, event.event_id);
+          }          break;
+
+          case "showcalculations":
+            await EventHandlers.handleCalculationButton(interaction);
+            break;
+            
 
         case "get":
           if (args[0] === "analysis") {
