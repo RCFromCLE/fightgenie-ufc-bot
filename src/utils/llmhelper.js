@@ -16,15 +16,15 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true,
 });
 
-async function generateEnhancedPredictionsWithAI(fights, eventInfo, model = "claude") {
+async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "claude") {
   try {
       console.log("Starting prediction generation with model:", model);
-      console.log("Number of fights to analyze:", fights.length);
+      console.log("Number of fights to analyze:", fightData.length);
       console.log("Event info:", JSON.stringify(eventInfo, null, 2));
 
       // Collect comprehensive data for each fight
       const enrichedFights = await Promise.all(
-          fights.map(async (fight) => {
+          fightData.map(async (fight) => {
               try {
                   const fighter1Data = await getFighterCompleteData(fight.fighter1);
                   const fighter2Data = await getFighterCompleteData(fight.fighter2);
