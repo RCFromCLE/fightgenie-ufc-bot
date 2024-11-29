@@ -2,127 +2,168 @@ const axios = require('axios');
 const database = require('../database');
 
 class PayPalService {
-    static API_BASE = process.env.NODE_ENV === 'production' 
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com';
+    static API_BASE = process.env.NODE_ENV === 'production'
+        ? 'https://api-m.paypal.com'
+        : 'https://api-m.sandbox.paypal.com';
 
-static async getAccessToken() {
-    try {
-        if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
-            throw new Error('PayPal credentials not configured');
-        }
+    static createCheckoutUrl(orderId) {
+        if (!orderId) return null;
 
-        // Create base64 encoded credentials - matching your working PowerShell script
-        const auth = Buffer.from(
-            `${process.env.PAYPAL_CLIENT_ID.trim()}:${process.env.PAYPAL_CLIENT_SECRET.trim()}`
-        ).toString('base64');
-
-        console.log('Getting PayPal access token...');
-        const response = await axios({
-            method: 'post',
-            url: `${this.API_BASE}/v1/oauth2/token`,
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Accept': 'application/json',
-                'Accept-Language': 'en_US',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            data: 'grant_type=client_credentials'
-        });
-
-        if (!response.data?.access_token) {
-            throw new Error('No access token received from PayPal');
-        }
-
-        console.log('Access token received successfully');
-        return response.data.access_token;
-    } catch (error) {
-        console.error('PayPal Auth Error:', {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status
-        });
-        throw error;
+        // Create PayPal checkout URL based on environment
+        return process.env.NODE_ENV === 'production'
+            ? `https://www.paypal.com/checkoutnow?token=${orderId}`
+            : `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}`;
     }
-}
 
-static async createPaymentOrder(userId, serverId, amount, paymentType) {
-    try {
-        const accessToken = await this.getAccessToken();
-        
-        const orderData = {
-            intent: "CAPTURE",
-            purchase_units: [{
-                reference_id: `${userId}-${serverId}`,
-                amount: {
-                    currency_code: "USD",
-                    value: amount.toFixed(2)
-                },
-                description: paymentType === 'SERVER_LIFETIME' ? 
-                    'Fight Genie Lifetime Server Access' : 
-                    'Fight Genie Event Access',
-                custom_id: `${userId}:${serverId}:${paymentType}`
-            }],
-            application_context: {
-                brand_name: 'Fight Genie',
-                landing_page: 'NO_PREFERENCE',
-                user_action: 'PAY_NOW',
-                return_url: 'https://discord.com/channels/@me',
-                cancel_url: 'https://discord.com/channels/@me'
+    static async getCheckoutUrl(orderId) {
+        try {
+            if (!orderId) {
+                throw new Error('Order ID is required');
             }
-        };
 
-        const response = await axios.post(
-            `${this.API_BASE}/v2/checkout/orders`,
-            orderData,
-            {
+            // First try to get order details to ensure it exists
+            const orderDetails = await this.getOrderDetails(orderId);
+            if (!orderDetails) {
+                throw new Error('Order not found');
+            }
+
+            // Find the approval URL from order links
+            const approveLink = orderDetails.links?.find(link =>
+                link.rel === "approve" ||
+                link.rel === "payer-action"
+            )?.href;
+
+            // Return approval URL if found, otherwise create standard checkout URL
+            return approveLink || this.createCheckoutUrl(orderId);
+
+        } catch (error) {
+            console.error('Error getting checkout URL:', error);
+            // Fallback to basic checkout URL
+            return this.createCheckoutUrl(orderId);
+        }
+    }
+    static async getAccessToken() {
+        try {
+            if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
+                throw new Error('PayPal credentials not configured');
+            }
+
+            // Properly format credentials and remove any whitespace
+            const credentials = Buffer.from(
+                `${process.env.PAYPAL_CLIENT_ID.trim()}:${process.env.PAYPAL_CLIENT_SECRET.trim()}`
+            ).toString('base64');
+
+            console.log('Getting PayPal access token...');
+            const response = await axios({
+                method: 'post',
+                url: `${this.API_BASE}/v1/oauth2/token`,
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                    'PayPal-Request-Id': `FG-${Date.now()}-${Math.random().toString(36).substring(7)}`
-                }
+                    'Authorization': `Basic ${credentials}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data: 'grant_type=client_credentials',
+                validateStatus: status => status < 500 // Don't throw on 4xx errors
+            });
+
+            if (response.status === 401) {
+                console.error('PayPal authentication failed:', response.data);
+                throw new Error('Invalid PayPal credentials');
             }
-        );
 
-        // Find the approve link
-        const approveLink = response.data.links.find(link => 
-            link.rel === "approve" || 
-            link.rel === "payer-action"
-        )?.href;
+            if (!response.data?.access_token) {
+                throw new Error('No access token received from PayPal');
+            }
 
-        if (!approveLink) {
-            throw new Error('No approval URL found in PayPal response');
+            console.log('Access token received successfully');
+            return response.data.access_token;
+        } catch (error) {
+            console.error('PayPal Auth Error:', {
+                message: error.message,
+                response: error.response?.data,
+                status: error.response?.status
+            });
+            throw new Error('Failed to authenticate with PayPal');
         }
-
-        // Store order details in database
-        await this.storeOrderDetails(response.data.id, {
-            serverId,
-            userId,
-            payment_type: paymentType,
-            amount: amount,
-            status: response.data.status
-        });
-
-        return {
-            orderId: response.data.id,
-            approveLink
-        };
-    } catch (error) {
-        console.error('PayPal Order Creation Error:', {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status
-        });
-        throw error;
     }
-}
+
+    static async createPaymentOrder(userId, serverId, amount, paymentType) {
+        try {
+            const accessToken = await this.getAccessToken();
+
+            const orderData = {
+                intent: "CAPTURE",
+                purchase_units: [{
+                    reference_id: `${userId}-${serverId}`,
+                    amount: {
+                        currency_code: "USD",
+                        value: amount.toFixed(2)
+                    },
+                    description: paymentType === 'SERVER_LIFETIME' ?
+                        'Fight Genie Lifetime Server Access' :
+                        'Fight Genie Event Access',
+                    custom_id: `${userId}:${serverId}:${paymentType}`
+                }],
+                application_context: {
+                    brand_name: 'Fight Genie',
+                    landing_page: 'NO_PREFERENCE',
+                    user_action: 'PAY_NOW',
+                    return_url: 'https://discord.com/channels/@me',
+                    cancel_url: 'https://discord.com/channels/@me'
+                }
+            };
+
+            console.log('Creating PayPal order with data:', orderData);
+
+            const response = await axios.post(
+                `${this.API_BASE}/v2/checkout/orders`,
+                orderData,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'PayPal-Request-Id': `FG-${Date.now()}-${Math.random().toString(36).substring(7)}`
+                    }
+                }
+            );
+
+            const approveLink = response.data.links.find(link =>
+                link.rel === "approve" ||
+                link.rel === "payer-action"
+            )?.href;
+
+            if (!approveLink) {
+                throw new Error('No approval URL found in PayPal response');
+            }
+
+            // Store order details in database
+            await this.storeOrderDetails(response.data.id, {
+                serverId,
+                userId,
+                payment_type: paymentType,
+                amount: amount,
+                status: response.data.status
+            });
+
+            return {
+                orderId: response.data.id,
+                approveLink
+            };
+        } catch (error) {
+            console.error('PayPal Order Creation Error:', {
+                message: error.message,
+                response: error.response?.data,
+                status: error.response?.status
+            });
+            throw error;
+        }
+    }
 
     static async storeOrderDetails(orderId, details) {
         try {
             if (!details.serverId || !details.userId) {
                 throw new Error('Missing required server or user ID for order storage');
             }
-    
+
             await database.query(`
                 INSERT INTO payment_logs (
                     payment_id,
@@ -143,7 +184,7 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
                 details.status,
                 'PAYPAL'
             ]);
-    
+
             console.log('Stored order details:', {
                 orderId,
                 serverId: details.serverId,
@@ -159,7 +200,7 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
         try {
             const accessToken = await this.getAccessToken();
             
-            console.log(`Verifying payment for order: ${orderId}`);
+            console.log(`Verifying payment status for order: ${orderId}`);
             const response = await axios.get(
                 `${this.API_BASE}/v2/checkout/orders/${orderId}`,
                 {
@@ -169,39 +210,86 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
                     }
                 }
             );
-
-            const status = response.data.status;
-            console.log('Order status:', status);
-
-            if (status === 'COMPLETED') {
-                return await this.processCompletedPayment(response.data);
+    
+            const orderStatus = response.data.status;
+            console.log('PayPal order status:', orderStatus);
+    
+            if (orderStatus === 'COMPLETED') {
+                const purchaseUnit = response.data.purchase_units[0];
+                const customData = purchaseUnit.custom_id?.split(':') || [];
+                const [userId, serverId, paymentType] = customData;
+    
+                return {
+                    success: true,
+                    status: 'COMPLETED',
+                    userId,
+                    serverId,
+                    paymentType,
+                    amount: parseFloat(purchaseUnit.amount.value)
+                };
             }
-
-            if (status === 'APPROVED') {
-                return await this.captureApprovedPayment(orderId, accessToken);
+    
+            // Handle APPROVED status
+            if (orderStatus === 'APPROVED') {
+                // Try to capture the payment
+                const captureResponse = await this.capturePayment(orderId, accessToken);
+                if (captureResponse.status === 'COMPLETED') {
+                    const purchaseUnit = captureResponse.purchase_units[0];
+                    const customData = purchaseUnit.custom_id?.split(':') || [];
+                    const [userId, serverId, paymentType] = customData;
+    
+                    return {
+                        success: true,
+                        status: 'COMPLETED',
+                        userId,
+                        serverId,
+                        paymentType,
+                        amount: parseFloat(purchaseUnit.amount.value)
+                    };
+                }
             }
-
+    
             return {
                 success: false,
-                status: status,
-                message: `Payment needs to be completed. Current status: ${status}`
+                status: orderStatus,
+                message: `Payment needs completion. Current status: ${orderStatus}`
             };
-
         } catch (error) {
-            console.error('Payment verification error:', error);
+            console.error('PayPal verification error:', error.response?.data || error.message);
             return {
                 success: false,
                 status: 'ERROR',
-                message: 'Error verifying payment. Please try again.',
-                error: error.message
+                message: 'Error verifying payment'
             };
+        }
+    }
+    
+    static async capturePayment(orderId, accessToken) {
+        try {
+            const response = await axios.post(
+                `${this.API_BASE}/v2/checkout/orders/${orderId}/capture`,
+                {},
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'PayPal-Request-Id': `FG-CAPTURE-${Date.now()}-${Math.random().toString(36).substring(7)}`
+                    }
+                }
+            );
+            
+            console.log('Payment capture response:', response.data);
+            return response.data;
+        } catch (error) {
+            console.error('Payment capture error:', error.response?.data || error.message);
+            throw error;
         }
     }
     
     static async processCompletedPayment(orderData) {
         try {
             const purchaseUnit = orderData.purchase_units[0];
-            
+
             let userId, serverId, paymentType;
             try {
                 if (purchaseUnit?.custom_id) {
@@ -209,7 +297,7 @@ static async createPaymentOrder(userId, serverId, amount, paymentType) {
                 } else if (purchaseUnit?.custom) {
                     [userId, serverId, paymentType] = purchaseUnit.custom.split(':');
                 }
-                
+
                 if (!userId || !serverId) {
                     throw new Error('Invalid payment data format');
                 }

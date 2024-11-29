@@ -6,9 +6,10 @@ const {
 } = require("discord.js");
 const database = require("../database");
 const ModelCommand = require("../commands/ModelCommand");
-const { generateEnhancedPredictionsWithAI } = require("./llmhelper");
+const { generateEnhancedPredictionsWith} = require("./llmhelper");
 const FighterStats = require("./fighterStats");
 const OddsAnalysis = require("./OddsAnalysis");
+const MarketAnalysis = require('../utils/MarketAnalysis');
 
 class PredictionHandler {
   static async getUpcomingEvent() {
@@ -183,51 +184,49 @@ async getCurrentEvent() {
     }
   }
 
-  static async displayPredictions(
-    interaction,
-    predictions,
-    event,
-    model,
-    cardType = "main"
-  ) {
+  static async displayPredictions(interaction, predictions, event, model, cardType = "main") {
     try {
-      const embed = this.createSplitPredictionEmbeds(
-        predictions,
-        event,
-        model,
-        cardType
-      )[0];
+        const embed = this.createSplitPredictionEmbeds(predictions, event, model, cardType)[0];
 
-      const optionsRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`get_analysis_${event.event_id}`)
-          .setLabel("Get Full Analysis")
-          .setEmoji("📝")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`betting_analysis_${event.event_id}`)
-          .setLabel("Betting Analysis")
-          .setEmoji("💰")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`show_event_${event.event_id}`)
-          .setLabel("Back to Event")
-          .setEmoji("↩️")
-          .setStyle(ButtonStyle.Success)
-      );
+        // Create two rows of buttons for better organization
+        const mainButtonsRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`get_analysis_${event.event_id}`)
+                .setLabel("Full Analysis")
+                .setEmoji("📝")
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`market_analysis_${event.event_id}`)
+                .setLabel("Market Intelligence")
+                .setEmoji("🎯")
+                .setStyle(ButtonStyle.Success)
+        );
 
-      await interaction.editReply({
-        embeds: [embed],
-        components: [optionsRow],
-      });
+        const secondaryButtonsRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`betting_analysis_${event.event_id}`)
+                .setLabel("Parlays & Props")
+                .setEmoji("💰")
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`show_event_${event.event_id}`)
+                .setLabel("Back to Event")
+                .setEmoji("↩️")
+                .setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.editReply({
+            embeds: [embed],
+            components: [mainButtonsRow, secondaryButtonsRow],
+        });
     } catch (error) {
-      console.error("Error displaying predictions:", error);
-      await interaction.editReply({
-        content: "Error displaying predictions. Please try again.",
-        ephemeral: true,
-      });
+        console.error("Error displaying predictions:", error);
+        await interaction.editReply({
+            content: "Error displaying predictions. Please try again.",
+            ephemeral: true,
+        });
     }
-  }
+}
 
   static createSplitPredictionEmbeds(
     predictions,
@@ -1022,7 +1021,7 @@ static async generateNewPredictions(interaction, event, cardType, model) {
         "",
         "This can happen if:",
         "• Fighter data is missing or incomplete",
-        "• The AI model is temporarily unavailable",
+        "• The model is temporarily unavailable",
         "• There are connection issues",
         "",
         "Please try again in a few moments."
@@ -1185,5 +1184,6 @@ static async getPrelimFights(eventName) {
   }
 }
 }
+
 
 module.exports = PredictionHandler;

@@ -148,80 +148,124 @@ class PaymentModel {
     }
   }
 
-  static async verifySolanaPayment(paymentAddress, expectedAmount) {
+  static async handleSolanaVerification(interaction) {
     try {
-      const connection = new web3.Connection(this.SOLANA_CONFIG.RPC_ENDPOINT);
-      const merchantWallet = new web3.PublicKey(paymentAddress);
-
-      // Get recent transactions
-      const signatures = await connection.getSignaturesForAddress(
-        merchantWallet,
-        { limit: 10 }
-      );
-
-      // Check transactions
-      for (const sigInfo of signatures) {
-        const tx = await connection.getTransaction(sigInfo.signature);
-        if (tx) {
-          const amountReceived =
-            tx.meta?.postBalances[0] - tx.meta?.preBalances[0];
-          if (amountReceived === expectedAmount) {
-            // Update payment status
-            await database.query(
-              `
-                            UPDATE solana_payments
-                            SET 
-                                status = 'COMPLETED',
-                                transaction_signature = ?,
-                                completed_at = datetime('now')
-                            WHERE payment_address = ?
-                            AND status = 'PENDING'
-                        `,
-              [sigInfo.signature, paymentAddress]
-            );
-
-            return {
-              success: true,
-              signature: sigInfo.signature,
-            };
-          }
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferUpdate();
         }
-      }
 
-      return {
-        success: false,
-        message: "Payment not found or amount mismatch",
-      };
+        // Extract payment info from customId
+        const [_, __, paymentId, serverId, amount] = interaction.customId.split('_');
+        
+        console.log('Verifying Solana payment:', { paymentId, serverId, amount });
+
+        const loadingEmbed = new EmbedBuilder()
+            .setColor('#ffff00')
+            .setTitle('⚡ Verifying Solana Payment')
+            .setDescription([
+                'Please wait while we verify your transaction...',
+                '',
+                `Amount Expected: ${amount} SOL`,
+                'This may take up to 30 seconds.'
+            ].join('\n'));
+
+        await interaction.editReply({
+            embeds: [loadingEmbed],
+            components: [],
+            ephemeral: true
+        });
+
+        const verificationResult = await SolanaPaymentService.verifyPayment(paymentId);
+
+        if (!verificationResult.success) {
+            const pendingEmbed = new EmbedBuilder()
+                .setColor('#ff9900')
+                .setTitle('⏳ Payment Not Found')
+                .setDescription([
+                    'Your Solana transaction has not been detected yet.',
+                    '',
+                    'Please ensure you:',
+                    `• Sent exactly ${amount} SOL`,
+                    '• Used the correct wallet address',
+                    '• Waited for network confirmation (~30 seconds)',
+                    '',
+                    'Click "Verify Payment" again after transaction confirms.'
+                ].join('\n'));
+
+            const retryButton = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`verify_solana_${paymentId}_${serverId}_${amount}`)
+                        .setLabel('Verify Payment')
+                        .setEmoji('⚡')
+                        .setStyle(ButtonStyle.Success)
+                );
+
+            await interaction.editReply({
+                embeds: [pendingEmbed],
+                components: [retryButton],
+                ephemeral: true
+            });
+            return;
+        }
+
+        // Activate subscription based on amount
+        const paymentAmount = parseFloat(amount);
+        const isLifetime = paymentAmount >= 49;
+
+        if (isLifetime) {
+            await PaymentModel.activateServerLifetimeSubscription(serverId, paymentId);
+        } else {
+            await PaymentModel.activateServerEventAccess(serverId, paymentId);
+        }
+
+        const successEmbed = new EmbedBuilder()
+            .setColor('#00ff00')
+            .setTitle('✅ Payment Successful!')
+            .setDescription([
+                `Payment of ${amount} SOL confirmed!`,
+                `Transaction: ${verificationResult.signature}`,
+                '',
+                isLifetime ? 
+                    '🌟 Lifetime access activated for your server!' :
+                    '🎟️ Event access activated for your server!',
+                '',
+                'All premium features are now unlocked:',
+                '• AI Fight Predictions',
+                '• Detailed Fighter Analysis',
+                '• Live Odds Integration',
+                '• Betting Analysis & Tips',
+                '',
+                'Use $upcoming to start viewing predictions!'
+            ].join('\n'));
+
+        await interaction.editReply({
+            embeds: [successEmbed],
+            components: [],
+            ephemeral: true
+        });
+
     } catch (error) {
-      console.error("Error verifying Solana payment:", error);
-      throw error;
-    }
-  }
+        console.error('Error verifying Solana payment:', error);
+        
+        const errorEmbed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle('❌ Verification Error')
+            .setDescription([
+                'An error occurred while verifying your payment.',
+                'Please try again in a few moments.',
+                '',
+                'If you completed the transaction, your access',
+                'will be activated automatically within a few minutes.'
+            ].join('\n'));
 
-  static async updateSolanaPaymentStatus(
-    paymentId,
-    status,
-    transactionSignature = null
-  ) {
-    try {
-      await database.query(
-        `
-                UPDATE solana_payments
-                SET 
-                    status = ?,
-                    transaction_signature = ?,
-                    completed_at = CASE WHEN ? = 'COMPLETED' THEN datetime('now') ELSE completed_at END
-                WHERE payment_id = ?
-            `,
-        [status, transactionSignature, status, paymentId]
-      );
-
-      return true;
-    } catch (error) {
-      console.error("Error updating Solana payment status:", error);
-      throw error;
+        await interaction.editReply({
+            embeds: [errorEmbed],
+            components: [],
+            ephemeral: true
+        });
     }
-  }
+}
 
   static async activateServerLifetimeSubscription(serverId, paymentId) {
     try {
@@ -248,65 +292,69 @@ class PaymentModel {
     }
   }
 
+
   static async activateServerEventAccess(serverId, paymentId) {
-    try {
-        console.log("Activating event access:", { serverId, paymentId });
-
-        const event = await database.query(`
-            SELECT event_id, Date 
-            FROM events 
-            WHERE Date >= date('now') 
-            ORDER BY Date ASC 
-            LIMIT 1
-        `);
-
-        if (!event || !event[0]) {
-            throw new Error("No upcoming event found");
-        }
-
-        // Set expiration to 1:30 AM EST the day after the event
-        const eventDate = new Date(event[0].Date);
-        const expirationDate = new Date(eventDate);
-        expirationDate.setDate(eventDate.getDate() + 1);
-        
-        // Set to exactly 1:30 AM EST
-        expirationDate.setHours(1, 30, 0, 0);
-
-        // Convert from EST to UTC for storage
-        const utcExpirationDate = new Date(
-            expirationDate.toLocaleString('en-US', { 
-                timeZone: 'America/New_York' 
-            })
-        );
-
-        await database.query(
-            `INSERT INTO server_subscriptions (
-                server_id,
-                subscription_type,
-                payment_id,
-                status,
-                event_id,
-                expiration_date,
-                created_at,
-                updated_at
-            ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'), datetime('now'))
-        `, [serverId, paymentId, event[0].event_id, utcExpirationDate.toISOString()]);
-
-        console.log("Event access activated:", {
-            eventId: event[0].event_id,
-            expiration: utcExpirationDate,
-            eventDate: eventDate
-        });
-
-        return {
-            eventId: event[0].event_id,
-            expirationDate: utcExpirationDate
-        };
-    } catch (error) {
-        console.error("Error activating server event access:", error);
-        throw error;
-    }
-}
+      try {
+          // First check if a subscription already exists
+          const existingSubscription = await database.query(`
+              SELECT * FROM server_subscriptions 
+              WHERE server_id = ? AND status = 'ACTIVE'
+          `, [serverId]);
+  
+          // Get the next event's date for expiration
+          const event = await database.query(`
+              SELECT event_id, Date 
+              FROM events 
+              WHERE Date >= date('now') 
+              ORDER BY Date ASC 
+              LIMIT 1
+          `);
+  
+          if (!event || !event[0]) {
+              throw new Error('No upcoming event found');
+          }
+  
+          // Set expiration to 1:30 AM EST the day after event
+          const eventDate = new Date(event[0].Date);
+          const expirationDate = new Date(eventDate);
+          expirationDate.setDate(eventDate.getDate() + 1);
+          expirationDate.setUTCHours(6, 30, 0, 0);
+  
+          if (existingSubscription && existingSubscription.length > 0) {
+              // Update existing subscription
+              await database.query(`
+                  UPDATE server_subscriptions 
+                  SET 
+                      payment_id = ?,
+                      event_id = ?,
+                      expiration_date = ?,
+                      updated_at = datetime('now')
+                  WHERE server_id = ? AND status = 'ACTIVE'
+              `, [paymentId, event[0].event_id, expirationDate.toISOString(), serverId]);
+          } else {
+              // Insert new subscription
+              await database.query(`
+                  INSERT INTO server_subscriptions (
+                      server_id,
+                      subscription_type,
+                      payment_id,
+                      status,
+                      event_id,
+                      expiration_date,
+                      created_at
+                  ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'))
+              `, [serverId, paymentId, event[0].event_id, expirationDate.toISOString()]);
+          }
+  
+          return {
+              eventId: event[0].event_id,
+              expirationDate: expirationDate
+          };
+      } catch (error) {
+          console.error('Error activating server event access:', error);
+          throw error;
+      }
+  }
 
   static async checkServerAccess(serverId, eventId = null) {
     try {
