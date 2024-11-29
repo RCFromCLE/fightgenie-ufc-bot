@@ -5,7 +5,7 @@
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "dev": "nodemon index.js",
+        "production": "nodemon index.js",
         "init-db": "node init-db.js"
     },
     "dependencies": {

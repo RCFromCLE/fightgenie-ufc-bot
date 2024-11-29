@@ -32,6 +32,7 @@ const StatsDisplayHandler = require("./src/utils/StatsDisplayHandler");
 const AdminLogger = require("./src/utils/AdminLogger");
 const AdminEventCommand = require("./src/commands/AdminEventCommand");
 const PromoCommand = require('./src/commands/PromoCommand');
+const MarketAnalysis = require("./src/utils/MarketAnalysis"); // Add this line
 const COMMAND_PREFIX = "$";
 
 // const ALLOWED_CHANNEL_ID = "1300201044730445864";
@@ -49,29 +50,29 @@ function checkEnvironmentVariables() {
     // Discord Configuration
     "DISCORD_TOKEN",
     "DISCORD_CLIENT_ID",
-    
+
     // API Keys
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "ODDS_API_KEY",
-    
+
     // Database Configuration
     "DB_PATH",
-    
+
     // Server Configuration
     "PORT",
-    
+
     // Environment
     "NODE_ENV",
-    
+
     // Bot Configuration
     "LOG_LEVEL",
     "COMMAND_PREFIX",
-    
+
     // PayPal Configuration
     "PAYPAL_CLIENT_ID",
     "PAYPAL_CLIENT_SECRET",
-    
+
     // Solana Configuration
     "SOLANA_RPC_URL",
     "SOLANA_MERCHANT_WALLET"
@@ -79,26 +80,26 @@ function checkEnvironmentVariables() {
   ];
 
   const missing = requiredVars.filter((varName) => !process.env[varName]);
-  
+
   // Optional variables can be checked separately
   const optionalVars = ["ALLOWED_CHANNEL_ID"];
   const missingOptional = optionalVars.filter((varName) => !process.env[varName]);
-  
+
   if (missing.length > 0) {
     console.error(`Missing required environment variables: ${missing.join(", ")}`);
     process.exit(1);
   }
-  
+
   if (missingOptional.length > 0) {
     console.warn(`Missing optional environment variables: ${missingOptional.join(", ")}`);
   }
-  
+
   // Additional validation for specific environments
   if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'production') {
     console.error('NODE_ENV must be either "development" or "production"');
     process.exit(1);
   }
-  
+
   console.log('Environment variables validation completed successfully');
 }
 
@@ -360,6 +361,7 @@ client.on("messageCreate", async (message) => {
   }
 });
 
+
 client.on("interactionCreate", async (interaction) => {
   if (!client.isReady()) {
     console.error("Interaction received but client is not ready.");
@@ -397,8 +399,14 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferUpdate().catch(console.error);
       }
 
-      const [action, ...args] = interaction.customId.split("_");
-
+      // Special handling for market analysis
+      let action, args;
+      if (interaction.customId.startsWith('market_analysis')) {
+        action = 'market_analysis';
+        args = interaction.customId.split('_').slice(2); // Skip 'market' and 'analysis'
+      } else {
+        [action, ...args] = interaction.customId.split("_");
+      }
       // Check access for prediction-related buttons
       if (
         action === "predict" ||
@@ -456,6 +464,15 @@ client.on("interactionCreate", async (interaction) => {
               orderId,
               serverId
             );
+          } else if (args[0] === "solana") {
+            // Extract paymentId, serverId and amount from the button's customId
+            const [paymentId, serverId, amount] = args.slice(1);
+            await PaymentHandler.handleSolanaVerification(
+              interaction,
+              paymentId,
+              serverId,
+              amount
+            );
           }
           break;
 
@@ -485,7 +502,218 @@ client.on("interactionCreate", async (interaction) => {
             eventId
           );
           break;
+          
 
+          case 'market_analysis': {
+            const eventId = args[0];
+            try {
+                if (!interaction.deferred && !interaction.replied) {
+                    await interaction.deferUpdate();
+                }
+        
+                const event = await EventHandlers.getUpcomingEvent();
+                if (!event) {
+                    await interaction.editReply({
+                        content: "No upcoming events found.",
+                        ephemeral: true
+                    });
+                    return;
+                }
+        
+                const currentModel = ModelCommand.getCurrentModel();
+                
+                // First check if we have recent analysis stored
+                const storedAnalysis = await database.query(`
+                    SELECT analysis_data, created_at
+                    FROM market_analysis
+                    WHERE event_id = ? 
+                    AND model_used = ?
+                    AND created_at > datetime('now', '-1 hour')
+                    ORDER BY created_at DESC LIMIT 1
+                `, [event.event_id, currentModel]);
+        
+                let marketAnalysis;
+                let oddsData;
+        
+                if (storedAnalysis?.length > 0) {
+                    console.log('Using stored market analysis');
+                    marketAnalysis = JSON.parse(storedAnalysis[0].analysis_data);
+                    oddsData = marketAnalysis.oddsData;
+                } else {
+                    console.log('Generating new market analysis');
+                    // Get predictions and odds
+                    const [mainCardPredictions, prelimPredictions, freshOddsData] = await Promise.all([
+                        PredictionHandler.getStoredPrediction(event.event_id, "main", currentModel),
+                        PredictionHandler.getStoredPrediction(event.event_id, "prelims", currentModel),
+                        OddsAnalysis.fetchUFCOdds()
+                    ]);
+        
+                    // Process fights and find best value plays
+                    const allFights = [...(mainCardPredictions?.fights || []), ...(prelimPredictions?.fights || [])];
+                    oddsData = freshOddsData;
+        
+                    // Calculate edges and sort by value
+                    const processedFights = allFights.map(fight => {
+                        const odds = OddsAnalysis.getFightOdds(fight, oddsData, 'fanduel');
+                        const impliedProb = odds ? OddsAnalysis.calculateImpliedProbability(
+                            fight.predictedWinner === fight.fighter1 ? odds.fighter1?.price : odds.fighter2?.price
+                        ) : 0;
+                        return {
+                            ...fight,
+                            impliedProbability: impliedProb,
+                            edge: fight.confidence - impliedProb,
+                            valueRating: MarketAnalysis.calculateValueRating(fight.confidence - impliedProb)
+                        };
+                    });
+        
+                    // Store the analysis
+                    await database.query(`
+                        INSERT INTO market_analysis (
+                            event_id,
+                            model_used,
+                            analysis_data,
+                            created_at
+                        ) VALUES (?, ?, ?, datetime('now'))
+                    `, [
+                        event.event_id,
+                        currentModel,
+                        JSON.stringify({
+                            processedFights,
+                            oddsData,
+                            timestamp: new Date().toISOString()
+                        })
+                    ]);
+        
+                    marketAnalysis = { processedFights, oddsData };
+                }
+        
+                // Get top value plays (edge > 10% and confidence > 65%)
+                const topValuePlays = marketAnalysis.processedFights
+                    .filter(fight => fight.edge > 10 && fight.confidence > 65)
+                    .sort((a, b) => b.edge - a.edge)
+                    .slice(0, 3);
+        
+                // Best main card and prelim picks
+                const mainCardPicks = marketAnalysis.processedFights
+                    .filter(fight => fight.is_main_card === 1 && fight.edge > 7.5)
+                    .sort((a, b) => b.confidence - a.confidence)
+                    .slice(0, 2);
+        
+                const prelimPicks = marketAnalysis.processedFights
+                    .filter(fight => fight.is_main_card === 0 && fight.edge > 7.5)
+                    .sort((a, b) => b.confidence - a.confidence)
+                    .slice(0, 2);
+        
+                const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
+                const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
+        
+                // Create main analysis embed
+                const marketAnalysisEmbed = new EmbedBuilder()
+                    .setColor("#00ff00")
+                    .setTitle(`🎯 UFC Market Intelligence Report ${modelEmoji}`)
+                    .setDescription([
+                        `*Advanced Analysis by ${modelName} Fight Analytics* | *Coming Soon* | *Still in Development*`,
+                        `Event: ${event.Event}`,
+                        `Date: ${new Date(event.Date).toLocaleDateString()}`,
+                        "",
+                        "Last Updated: " + new Date().toLocaleString(),
+                        "\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                    ].join('\n'))
+                    .addFields(
+                        {
+                            name: "💎 Top Value Plays",
+                            value: topValuePlays.map(fight => 
+                              `${getValueStars(fight.edge)} ${fight.predictedWinner} (${fight.confidence}% vs ${fight.impliedProbability.toFixed(1)}% implied)\n` +
+                              `└ Edge: ${fight.edge.toFixed(1)}% | Method: ${fight.method}`
+                          ).join('\n\n') || "No significant value plays found",
+                          inline: false
+                        },
+                        {
+                            name: "🎯 Best Main Card Picks",
+                            value: mainCardPicks.map(fight => 
+                                `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
+                                `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
+                            ).join('\n\n') || "No strong main card picks",
+                            inline: false
+                        },
+                        {
+                            name: "🥊 Best Prelim Picks",
+                            value: prelimPicks.map(fight => 
+                                `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
+                                `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
+                            ).join('\n\n') || "No strong prelim picks",
+                            inline: false
+                        }
+                    );
+        
+                // Create explanation embed
+                const explanationEmbed = new EmbedBuilder()
+                    .setColor("#0099ff")
+                    .setTitle("🎓 Understanding Value Ratings")
+                    .addFields(
+                        {
+                            name: "⭐ Star Rating System",
+                            value: [
+                                "⭐⭐⭐⭐⭐ = Elite Value (20%+ edge)",
+                                "⭐⭐⭐⭐ = Strong Value (15%+ edge)",
+                                "⭐⭐⭐ = Good Value (10%+ edge)",
+                                "⭐⭐ = Decent Value (7.5%+ edge)",
+                                "⭐ = Slight Value (5%+ edge)",
+                                "",
+                                "**How We Calculate Edge:**",
+                                "Edge = Our Confidence - Implied Probability",
+                                "Example: 70% confidence vs 55% implied = 15% edge"
+                            ].join('\n'),
+                            inline: false
+                        }
+                    );
+        
+                const navigationRow = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`predict_main_${currentModel}_${event.event_id}`)
+                            .setLabel("Back to AI Predictions")
+                            .setEmoji("📊")
+                            .setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder()
+                            .setCustomId(`betting_analysis_${event.event_id}`)
+                            .setLabel("AI Betting Analysis")
+                            .setEmoji("💰")
+                            .setStyle(ButtonStyle.Success)
+                    );
+        
+                await interaction.editReply({
+                    embeds: [marketAnalysisEmbed, explanationEmbed],
+                    components: [navigationRow],
+                    files: [{
+                        attachment: "./src/images/FightGenie_Logo_1.PNG",
+                        name: "FightGenie_Logo_1.PNG"
+                    }]
+                });
+        
+            } catch (error) {
+                console.error("Error displaying market analysis:", error);
+                await interaction.editReply({
+                    content: "Error generating market analysis. Please try again.",
+                    ephemeral: true
+                });
+            }
+            break;
+
+// Add helper function for star ratings
+function getValueStars(edge) {
+  if (edge >= 20) return "⭐⭐⭐⭐⭐";
+  if (edge >= 15) return "⭐⭐⭐⭐";
+  if (edge >= 10) return "⭐⭐⭐";
+  if (edge >= 7.5) return "⭐⭐";
+  if (edge >= 5) return "⭐";
+  return "";
+}
+
+
+        }
+
+        
         case "prev":
         case "next":
         case "analysis":
@@ -500,12 +728,12 @@ client.on("interactionCreate", async (interaction) => {
             // Handle direct betting_analysis button
             const event = await EventHandlers.getUpcomingEvent();
             await EventHandlers.displayBettingAnalysis(interaction, event.event_id);
-          }          break;
+          }
+          break;
 
-          case "showcalculations":
-            await EventHandlers.handleCalculationButton(interaction);
-            break;
-            
+        case "showcalculations":
+          await EventHandlers.handleCalculationButton(interaction);
+          break;
 
         case "get":
           if (args[0] === "analysis") {
@@ -682,6 +910,7 @@ client.on("interactionCreate", async (interaction) => {
           console.log(`Unknown interaction: ${interaction.customId}`);
       }
     }
+
   } catch (error) {
     console.error("Interaction error:", error);
     try {
@@ -756,8 +985,7 @@ client.once("ready", () => {
   console.log(`Bot is ready as ${client.user.tag}`);
 
   client.user.setActivity(
-    `AI UFC Predictions | $help | ${
-      11 + Math.max(0, client.guilds.cache.size - 1)
+    `AI UFC Predictions | $help | ${11 + Math.max(0, client.guilds.cache.size - 1)
     } servers`,
     { type: ActivityType.Competing }
   );
@@ -787,8 +1015,22 @@ async function startup() {
 
     process.exit(1);
   }
-}
 
+  // Schedule subscription cleanup every 10 minutes
+  const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+  // Initial cleanup on startup
+  setTimeout(async () => {
+    console.log('Performing initial subscription cleanup...');
+    await database.cleanupExpiredSubscriptions();
+  }, 5000); // Wait 5 seconds after startup
+
+  // Set up recurring cleanup
+  setInterval(async () => {
+    console.log('Running scheduled subscription cleanup...');
+    await database.cleanupExpiredSubscriptions();
+  }, CLEANUP_INTERVAL);
+}
 startup();
 
 module.exports = { client };

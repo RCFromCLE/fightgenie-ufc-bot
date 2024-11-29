@@ -5,8 +5,6 @@ const cheerio = require("cheerio");
 const client = require('../index').client;
 
 
-
-
 class DatabaseManager {
   constructor() {
     this.db = new sqlite3.Database(
@@ -389,58 +387,55 @@ async initializeDatabase() {
     }
   }
 
-  async activateServerEventAccess(serverId, paymentId) {
-      try {
-          // Get the next event's date for expiration
-          const event = await this.query(`
-              SELECT event_id, Date 
-              FROM events 
-              WHERE Date >= date('now') 
-              ORDER BY Date ASC 
-              LIMIT 1
-          `);
+  static async activateServerEventAccess(serverId, paymentId) {
+    try {
+        const db = new DatabaseManager();  // Create a new instance instead of using the exported one
+        
+        // Get the next event's date for expiration
+        const event = await db.query(`
+            SELECT event_id, Date 
+            FROM events 
+            WHERE Date >= date('now') 
+            ORDER BY Date ASC 
+            LIMIT 1
+        `);
 
-          if (!event || !event[0]) {
-              throw new Error('No upcoming event found');
-          }
+        if (!event || !event[0]) {
+            throw new Error('No upcoming event found');
+        }
 
-          // Set expiration to day after event
-          const expirationDate = new Date(event[0].Date);
-          expirationDate.setDate(expirationDate.getDate() + 1);
+        // Set expiration to 1:30 AM EST the day after event
+        const eventDate = new Date(event[0].Date);
+        const expirationDate = new Date(eventDate);
+        expirationDate.setDate(eventDate.getDate() + 1);
+        expirationDate.setUTCHours(6, 30, 0, 0);
 
-          await this.query(`
-              INSERT OR REPLACE INTO server_subscriptions (
-                  server_id,
-                  subscription_type,
-                  payment_id,
-                  status,
-                  event_id,
-                  expiration_date,
-                  created_at
-              ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'))
-          `, [
-              serverId,
-              paymentId,
-              event[0].event_id,
-              expirationDate.toISOString()
-          ]);
+        await db.query(`
+            INSERT OR REPLACE INTO server_subscriptions (
+                server_id,
+                subscription_type,
+                payment_id,
+                status,
+                event_id,
+                expiration_date,
+                created_at
+            ) VALUES (?, 'EVENT', ?, 'ACTIVE', ?, ?, datetime('now'))
+        `, [
+            serverId,
+            paymentId,
+            event[0].event_id,
+            expirationDate.toISOString()
+        ]);
 
-          console.log('Event access activated:', {
-              serverId,
-              paymentId,
-              eventId: event[0].event_id,
-              expiration: expirationDate
-          });
-
-          return {
-              eventId: event[0].event_id,
-              expirationDate: expirationDate
-          };
-      } catch (error) {
-          console.error('Error activating server event access:', error);
-          throw error;
-      }
-  }
+        return {
+            eventId: event[0].event_id,
+            expirationDate: expirationDate
+        };
+    } catch (error) {
+        console.error('Error activating server event access:', error);
+        throw error;
+    }
+}
 
   async checkServerAccess(serverId, eventId) {
     try {
@@ -1895,7 +1890,7 @@ async insertEventFight(event, fight) {
         }
       });
     });
-  }
+}
 
   async getFinishes(fighterName, position, method) {
     return new Promise((resolve, reject) => {
@@ -1918,50 +1913,62 @@ async insertEventFight(event, fight) {
       );
     });
   }
+
+  async cleanupExpiredSubscriptions() {
+    try {
+        console.log('\n=== Starting Subscription Cleanup ===');
+        const before = await this.query(`
+            SELECT COUNT(*) as count 
+            FROM server_subscriptions 
+            WHERE status = 'ACTIVE' 
+            AND subscription_type = 'EVENT'`
+        );
+
+        const result = await this.query(`
+            UPDATE server_subscriptions 
+            SET 
+                status = 'EXPIRED',
+                updated_at = datetime('now')
+            WHERE expiration_date < datetime('now')
+            AND subscription_type = 'EVENT'
+            AND status = 'ACTIVE'
+            RETURNING server_id, event_id, expiration_date
+        `);
+
+        const after = await this.query(`
+            SELECT COUNT(*) as count 
+            FROM server_subscriptions 
+            WHERE status = 'ACTIVE' 
+            AND subscription_type = 'EVENT'`
+        );
+
+        console.log('Subscription Cleanup Results:', {
+            activeSubscriptionsBefore: before[0]?.count || 0,
+            activeSubscriptionsAfter: after[0]?.count || 0,
+            expiredCount: result?.length || 0,
+            expiredSubscriptions: result?.map(sub => ({
+                serverId: sub.server_id,
+                eventId: sub.event_id,
+                expiredAt: sub.expiration_date
+            }))
+        });
+
+        return {
+            success: true,
+            expiredCount: result?.length || 0,
+            expiredSubscriptions: result || []
+        };
+    } catch (error) {
+        console.error('Error cleaning up expired subscriptions:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
 }
 
-// Helper function for getting event link
-async function getEventLink() {
-  try {
-    const response = await axios.get(
-      "http://www.ufcstats.com/statistics/events/completed"
-    );
-    const $ = cheerio.load(response.data);
-    const nextEventRow = $('tr:contains("NEXT")');
-    const eventLink = nextEventRow.find("a").attr("href");
-    return eventLink || null;
-  } catch (error) {
-    console.error("Error fetching event link:", error);
-    return null;
-  }
+
 }
-
-async function calculateWinRate(fighterName) {
-  try {
-    const result = await query(
-      `
-      SELECT 
-        COUNT(CASE WHEN Winner = ? THEN 1 END) as wins,
-        COUNT(*) as total_fights
-      FROM events
-      WHERE Winner = ? OR Loser = ?
-    `,
-      [fighterName, fighterName, fighterName]
-    );
-
-    if (!result || !result[0]) return 0;
-
-    const { wins, total_fights } = result[0];
-    return total_fights > 0 ? (wins / total_fights) * 100 : 0;
-  } catch (error) {
-    console.error(`Error calculating win rate for ${fighterName}:`, error);
-    return 0;
-  }
-
-  
-}
-
-
 
 const database = new DatabaseManager();
 
