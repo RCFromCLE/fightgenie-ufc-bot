@@ -233,10 +233,10 @@ class PaymentModel {
                 'All premium features are now unlocked:',
                 '• AI Fight Predictions',
                 '• Detailed Fighter Analysis',
-                '• Live Odds Integration',
                 '• Betting Analysis & Tips',
+                '• Fight Genie Parlays & Value Picks',
                 '',
-                'Use $upcoming to start viewing predictions!'
+                'Use $upcoming to start viewing predictions and analysis!'
             ].join('\n'));
 
         await interaction.editReply({

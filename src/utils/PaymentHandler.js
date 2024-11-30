@@ -12,148 +12,254 @@ const SolanaPriceService = require("./SolanaPriceService");
 const SolanaPaymentService = require("./SolanaPaymentService");
 const QRCode = require("qrcode");
 const { AttachmentBuilder } = require("discord.js");
+const StripePaymentService = require('./StripePaymentService');
+
 
 class PaymentHandler {
   static PAYMENT_TIMEOUT_MINS = 30;
 
   static async handlePayment(interaction) {
     try {
-      if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferUpdate();
-      }
-
-      const [action, purchaseType, method, guildId] =
-        interaction.customId.split("_");
-      const userId = interaction.user.id;
-      const userName = interaction.user.username;
-
-      // Handle initial payment setup
-      if (action === "buy") {
-        const isLifetime = purchaseType === "lifetime";
-        const baseAmount = isLifetime ? 50.0 : 6.99;
-
-        if (method === "solana") {
-          // Get SOL amount with 10% discount
-          const solAmount = await SolanaPriceService.getPriceWithDiscount(
-            baseAmount
-          );
-          await this.handleSolanaPayment(interaction, {
-            amount: solAmount,
-            isLifetime,
-            guildId,
-            userId,
-            userName,
-          });
-        } else if (method === "paypal") {
-          await this.handlePayPalPayment(interaction, {
-            amount: baseAmount,
-            isLifetime,
-            guildId,
-            userId,
-            userName,
-          });
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferUpdate();
         }
-        return;
-      }
 
-      // Handle payment verification
-      if (action === "verify") {
-        const [_, paymentMethod, paymentId, serverId, amount] =
-          interaction.customId.split("_");
+        const [action, purchaseType, method, guildId] = interaction.customId.split("_");
+        const userId = interaction.user.id;
+        const userName = interaction.user.username;
 
-        if (paymentMethod === "solana") {
-          const result = await SolanaPaymentService.verifyPayment(
-            paymentId,
-            parseFloat(amount)
-          );
+        // Handle initial payment setup
+        if (action === "buy") {
+            const isLifetime = purchaseType === "lifetime";
+            const baseAmount = isLifetime ? 50.0 : 6.99;
 
-          if (result.success) {
-            const paymentAmount = parseFloat(amount);
-            const isLifetime = paymentAmount >= 0.5;
+            // Get upcoming event info for payment messages
+            const upcomingEvent = await database.query(`
+                SELECT event_id, Event, Date,
+                       datetime(Date, '+2 day', '1:30:00') as expiration_date,
+                       City, Country
+                FROM events 
+                WHERE Date >= datetime('now')
+                ORDER BY Date ASC
+                LIMIT 1
+            `);
 
-            if (isLifetime) {
-              await PaymentModel.activateServerLifetimeSubscription(
-                serverId,
-                paymentId
-              );
-            } else {
-              await PaymentModel.activateServerEventAccess(serverId, paymentId);
+            const eventInfo = upcomingEvent[0];
+            const eventDate = new Date(eventInfo.Date);
+            const expirationDate = new Date(eventInfo.expiration_date);
+
+            switch (method) {
+              case "stripe":
+                // Create Stripe payment session
+                const session = await StripePaymentService.createPaymentSession(
+                    guildId,
+                    isLifetime ? 'SERVER_LIFETIME' : 'SERVER_EVENT',
+                    userId
+                );
+            
+                const stripeEmbed = new EmbedBuilder()
+                    .setColor('#0099ff')
+                    .setTitle('💳 Complete Your Purchase')
+                    .setDescription([
+                        'Complete your purchase:',
+                        '',
+                        '🔒 Secure payment via Stripe',
+                        '📱 Apple Pay available on compatible devices',
+                        '💳 All major cards accepted',
+                        '',
+                        isLifetime ? [
+                            '🌟 Lifetime Server Access',
+                            '• Access to all future UFC events',
+                            '• Never pay again',
+                            '• Premium features included',
+                            '',
+                            `💰 Amount: $${baseAmount.toFixed(2)}`
+                        ].join('\n') : [
+                            '🎟️ Event Access',
+                            `Event: ${eventInfo.Event}`,
+                            `Date: ${eventDate.toLocaleString()}`,
+                            `Location: ${eventInfo.City}, ${eventInfo.Country}`,
+                            // `Expires: ${new Date(upcomingEvent.Date).setHours(25, 30, 0, 0).toLocaleString()}`                            '',
+                            `💰 Amount: $${baseAmount.toFixed(2)}`
+                        ].join('\n'),
+                        '',
+                        '1️⃣ Click the payment button below',
+                        '2️⃣ Complete payment on Stripe',
+                        '3️⃣ Return here and click "Verify Payment"'
+                    ].join('\n'));
+            
+                const stripeButtons = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setLabel('Pay with Card/Apple Pay')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(session.url),
+                        new ButtonBuilder()
+                            .setCustomId(`verify_stripe_${session.sessionId}_${guildId}`)
+                            .setLabel('Verify Payment')
+                            .setEmoji('✅')
+                            .setStyle(ButtonStyle.Success)
+                    );
+            
+                await interaction.editReply({
+                    embeds: [stripeEmbed],
+                    components: [stripeButtons]
+                });
+                break;
+
+                case "solana":
+                    // Get SOL amount with 10% discount
+                    const solAmount = await SolanaPriceService.getPriceWithDiscount(baseAmount);
+                    await this.handleSolanaPayment(interaction, {
+                        amount: solAmount,
+                        isLifetime,
+                        guildId,
+                        userId,
+                        userName,
+                        eventInfo
+                    });
+                    break;
+
+                case "paypal":
+                    await this.handlePayPalPayment(interaction, {
+                        amount: baseAmount,
+                        isLifetime,
+                        guildId,
+                        userId,
+                        userName,
+                        eventInfo
+                    });
+                    break;
+            }
+            return;
+        }
+
+        // Handle payment verification
+        if (action === "verify") {
+            const [paymentMethod, paymentId, serverId] = interaction.customId.split("_").slice(1);
+
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate();
             }
 
-            const successEmbed = new EmbedBuilder()
-              .setColor("#00ff00")
-              .setTitle("✅ Solana Payment Successful!")
-              .setDescription(
-                [
-                  `Your payment of ${amount} SOL has been verified.`,
-                  `Transaction: ${result.signature}`,
-                  "",
-                  isLifetime
-                    ? "🌟 Lifetime access has been activated for this server!"
-                    : "🎟️ Event access has been activated for this server!",
-                  "",
-                  "You can now use all Fight Genie features:",
-                  "• AI-powered fight predictions",
-                  "• Detailed fighter analysis",
-                  "• Betting insights",
-                  "• Live odds integration",
-                ].join("\n")
-              );
+            const loadingEmbed = new EmbedBuilder()
+                .setColor('#ffff00')
+                .setTitle('🔄 Verifying Payment')
+                .setDescription('Please wait while we verify your payment...');
 
             await interaction.editReply({
-              embeds: [successEmbed],
-              components: [],
-              ephemeral: true,
+                embeds: [loadingEmbed],
+                components: []
             });
-          } else {
-            const pendingEmbed = new EmbedBuilder()
-              .setColor("#ff9900")
-              .setTitle("⏳ Transaction Pending")
-              .setDescription(
-                [
-                  "Your Solana transaction has not been detected yet.",
-                  "",
-                  "Please ensure you've:",
-                  "1. Sent the exact amount of SOL",
-                  "2. Sent to the correct address",
-                  "3. Waited for network confirmation (~30 seconds)",
-                  "",
-                  'Click "Verify Payment" again after sending the payment.',
-                ].join("\n")
-              );
 
-            const verifyButton = new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`verify_solana_${paymentId}_${serverId}_${amount}`)
-                .setLabel("Verify Payment")
-                .setEmoji("⚡")
-                .setStyle(ButtonStyle.Success)
-            );
+            const upcomingEvent = await database.getUpcomingEvent();
 
-            await interaction.editReply({
-              embeds: [pendingEmbed],
-              components: [verifyButton],
-              ephemeral: true,
-            });
-          }
-        } else {
-          await this.handlePaymentVerification(
-            interaction,
-            paymentId,
-            serverId
-          );
+            switch (paymentMethod) {
+                case "stripe":
+                    const stripeResult = await StripePaymentService.verifyPayment(paymentId);
+                    if (stripeResult.success) {
+                        const isLifetime = stripeResult.amount === 50.00;
+                        
+                        if (isLifetime) {
+                            await PaymentModel.activateServerLifetimeSubscription(serverId, paymentId);
+                        } else {
+                            await PaymentModel.activateServerEventAccess(serverId, paymentId);
+                        }
+
+                        const successEmbed = new EmbedBuilder()
+                            .setColor('#00ff00')
+                            .setTitle('✅ Payment Successful!')
+                            .setDescription([
+                                `Payment of $${stripeResult.amount.toFixed(2)} confirmed!`,
+                                '',
+                                isLifetime ? 
+                                    '🌟 Lifetime access has been activated for your server!' :
+                                    [
+                                        '🎟️ Event access has been activated!',
+                                        '',
+                                        `Event: ${upcomingEvent.Event}`,
+                                        `Date: ${new Date(upcomingEvent.Date).toLocaleString()}`,
+                                        upcomingEvent.City ? `Location: ${upcomingEvent.City}, ${upcomingEvent.Country}` : '',
+                                        `Access Expires: ${new Date(upcomingEvent.Date).setHours(25, 30, 0, 0).toLocaleString()}`
+                                    ].join('\n'),
+                                '',
+                                'You can now use all Fight Genie features:',
+                                '• AI-powered fight predictions',
+                                '• Detailed fighter analysis',
+                                '• Live odds integration',
+                                '• Betting insights',
+                                '',
+                                'Use `$upcoming` to start viewing predictions!'
+                            ].join('\n'));
+
+                        await interaction.editReply({
+                            embeds: [successEmbed],
+                            components: []
+                        });
+                    } else {
+                        const pendingEmbed = new EmbedBuilder()
+                            .setColor('#ff9900')
+                            .setTitle('⏳ Payment Pending')
+                            .setDescription([
+                                'Your payment has not been confirmed yet.',
+                                '',
+                                'If you\'ve just completed payment,',
+                                'please wait a moment and try verifying again.',
+                                '',
+                                'Need help? Contact support in our server.'
+                            ].join('\n'));
+
+                        const verifyButton = new ActionRowBuilder()
+                            .addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId(`verify_stripe_${paymentId}_${serverId}`)
+                                    .setLabel('Verify Payment')
+                                    .setEmoji('✅')
+                                    .setStyle(ButtonStyle.Success)
+                            );
+
+                        await interaction.editReply({
+                            embeds: [pendingEmbed],
+                            components: [verifyButton]
+                        });
+                    }
+                    break;
+
+                case "solana":
+                    const result = await SolanaPaymentService.verifyPayment(paymentId);
+                    if (result.success) {
+                        if (result.amount >= 0.5) {
+                            await PaymentModel.activateServerLifetimeSubscription(serverId, paymentId);
+                        } else {
+                            await PaymentModel.activateServerEventAccess(serverId, paymentId);
+                        }
+                        await this.handleSolanaVerification(interaction, paymentId, serverId, result.amount);
+                    } else {
+                        await this.handleSolanaVerification(interaction, paymentId, serverId, result.amount);
+                    }
+                    break;
+
+                case "paypal":
+                    await this.handlePayPalVerification(interaction, paymentId, serverId);
+                    break;
+
+                default:
+                    await interaction.editReply({
+                        content: "Invalid payment verification method.",
+                        ephemeral: true
+                    });
+            }
         }
-      }
     } catch (error) {
-      console.error("Payment handling error:", error);
-      await interaction.editReply({
-        content: "Error processing payment request. Please try again.",
-        ephemeral: true,
-      });
+        console.error("Payment handling error:", error);
+        await interaction.editReply({
+            content: "Error processing payment request. Please try again.",
+            ephemeral: true
+        });
     }
-  }
+}
 
-  static async handleSolanaPayment(
+static async handleSolanaPayment(
     interaction,
     { amount, isLifetime, guildId, userId, userName }
 ) {

@@ -18,7 +18,7 @@ class PaymentCommand {
                 AND status = 'ACTIVE'
                 LIMIT 1
             `, [serverId]);
-            
+
             return subscriptions?.length > 0;
         } catch (error) {
             console.error("Error checking lifetime access:", error);
@@ -92,9 +92,10 @@ class PaymentCommand {
 
             const lifetimeUsdAmount = 50.00;
             const lifetimeSolAmount = await SolanaPriceService.getPriceWithDiscount(lifetimeUsdAmount);
+            
 
             // Handle Active Event Access
-            if (subscription?.[0]?.subscription_type === 'EVENT' && 
+            if (subscription?.[0]?.subscription_type === 'EVENT' &&
                 new Date(subscription[0].formatted_expiration) > new Date()) {
 
                 const upgradeEmbed = new EmbedBuilder()
@@ -120,12 +121,18 @@ class PaymentCommand {
                         "• Unlimited server member access",
                         "",
                         "**One-Time Upgrade Pricing:**",
+                        `• Apple Pay: $${lifetimeUsdAmount.toFixed(2)}`,
                         `• PayPal: $${lifetimeUsdAmount.toFixed(2)}`,
                         `• Solana: ${lifetimeSolAmount} SOL (10% discount!)`
                     ].join('\n'));
 
                 const upgradeButtons = new ActionRowBuilder()
                     .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`buy_lifetime_stripe_${guildId}`)
+                            .setLabel("Upgrade with Apple Pay")
+                            .setEmoji("💳")
+                            .setStyle(ButtonStyle.Primary),
                         new ButtonBuilder()
                             .setCustomId(`buy_lifetime_paypal_${guildId}`)
                             .setLabel("Upgrade with PayPal")
@@ -154,7 +161,6 @@ class PaymentCommand {
                 return;
             }
 
-            // Rest of the code for handling no subscription remains the same...
             const upcomingEvent = await database.getUpcomingEvent();
             if (!upcomingEvent) {
                 await message.reply({
@@ -167,7 +173,6 @@ class PaymentCommand {
             const eventUsdAmount = 6.99;
             const eventSolAmount = await SolanaPriceService.getPriceWithDiscount(eventUsdAmount);
 
-            // ... rest of the code remains unchanged ...
             const purchaseEmbed = new EmbedBuilder()
                 .setColor('#0099ff')
                 .setTitle('🎯 Fight Genie Access Options')
@@ -190,6 +195,7 @@ class PaymentCommand {
                             "• Premium features included",
                             "• Priority support access",
                             "",
+                            "Apple Pay: $" + lifetimeUsdAmount.toFixed(2),
                             `PayPal: $${lifetimeUsdAmount.toFixed(2)}`,
                             `Solana: ${lifetimeSolAmount} SOL (10% off!)`,
                             "```"
@@ -205,6 +211,7 @@ class PaymentCommand {
                             "• Access until event completion",
                             "• Perfect for single event access",
                             "",
+                            "Apple Pay: $" + eventUsdAmount.toFixed(2),
                             `PayPal: $${eventUsdAmount.toFixed(2)}`,
                             `Solana: ${eventSolAmount} SOL (10% off!)`,
                             "```"
@@ -218,34 +225,44 @@ class PaymentCommand {
                     }
                 );
 
-            const purchaseButtons = [
-                new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`buy_lifetime_paypal_${guildId}`)
-                            .setLabel("Lifetime Access - PayPal")
-                            .setEmoji("🌐")
-                            .setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder()
-                            .setCustomId(`buy_lifetime_solana_${guildId}`)
-                            .setLabel("Lifetime Access - Solana")
-                            .setEmoji("⚡")
-                            .setStyle(ButtonStyle.Success)
-                    ),
-                new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`buy_event_paypal_${guildId}`)
-                            .setLabel("Event Access - PayPal")
-                            .setEmoji("🎟️")
-                            .setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder()
-                            .setCustomId(`buy_event_solana_${guildId}`)
-                            .setLabel("Event Access - Solana")
-                            .setEmoji("⚡")
-                            .setStyle(ButtonStyle.Secondary)
-                    )
-            ];
+                const purchaseButtons = [
+                    new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`buy_lifetime_stripe_${guildId}`)
+                                .setLabel("Lifetime Access - Apple Pay")
+                                .setEmoji("💳")
+                                .setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder()
+                                .setCustomId(`buy_lifetime_paypal_${guildId}`)
+                                .setLabel("Lifetime Access - PayPal")
+                                .setEmoji("🌐")
+                                .setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder()
+                                .setCustomId(`buy_lifetime_solana_${guildId}`)
+                                .setLabel("Lifetime Access - Solana")
+                                .setEmoji("⚡")
+                                .setStyle(ButtonStyle.Success)
+                        ),
+                    new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`buy_event_stripe_${guildId}`)
+                                .setLabel("Event Access - Apple Pay")
+                                .setEmoji("💳")
+                                .setStyle(ButtonStyle.Secondary),
+                            new ButtonBuilder()
+                                .setCustomId(`buy_event_paypal_${guildId}`)
+                                .setLabel("Event Access - PayPal")
+                                .setEmoji("🎟️")
+                                .setStyle(ButtonStyle.Secondary),
+                            new ButtonBuilder()
+                                .setCustomId(`buy_event_solana_${guildId}`)
+                                .setLabel("Event Access - Solana")
+                                .setEmoji("⚡")
+                                .setStyle(ButtonStyle.Secondary)
+                        )
+                ];
 
             await message.author.send({
                 embeds: [purchaseEmbed],
