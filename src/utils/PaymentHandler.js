@@ -46,7 +46,9 @@ class PaymentHandler {
 
             const eventInfo = upcomingEvent[0];
             const eventDate = new Date(eventInfo.Date);
+            eventDate.setDate(eventDate.getDate() + 1);
             const expirationDate = new Date(eventInfo.expiration_date);
+            expirationDate.setDate(expirationDate.getDate() + 1);
 
             switch (method) {
               case "stripe":
@@ -84,14 +86,14 @@ class PaymentHandler {
                         ].join('\n'),
                         '',
                         '1️⃣ Click the payment button below',
-                        '2️⃣ Complete payment on Stripe',
+                        '2️⃣ Complete payment on Stripe via Apple Pay or card',
                         '3️⃣ Return here and click "Verify Payment"'
                     ].join('\n'));
             
                 const stripeButtons = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
-                            .setLabel('Pay with Card/Apple Pay')
+                            .setLabel('Pay with Apple Pay/Card')
                             .setStyle(ButtonStyle.Link)
                             .setURL(session.url),
                         new ButtonBuilder()
