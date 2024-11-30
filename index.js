@@ -2,17 +2,11 @@
 
 const {
   Client,
-
   GatewayIntentBits,
-
   ActivityType,
-
   EmbedBuilder,
-
   ButtonBuilder,
-
   ActionRowBuilder,
-
   ButtonStyle,
 } = require("discord.js");
 
@@ -32,7 +26,9 @@ const StatsDisplayHandler = require("./src/utils/StatsDisplayHandler");
 const AdminLogger = require("./src/utils/AdminLogger");
 const AdminEventCommand = require("./src/commands/AdminEventCommand");
 const PromoCommand = require('./src/commands/PromoCommand');
-const MarketAnalysis = require("./src/utils/MarketAnalysis"); // Add this line
+const MarketAnalysis = require("./src/utils/MarketAnalysis");
+const StripePaymentService = require("./src/utils/StripePaymentService");
+
 const COMMAND_PREFIX = "$";
 
 // const ALLOWED_CHANNEL_ID = "1300201044730445864";
@@ -457,6 +453,10 @@ client.on("interactionCreate", async (interaction) => {
           break;
 
         case "verify":
+          if (args[0] === 'stripe') {
+            await StripePaymentService.handleVerificationButton(interaction);
+            return;
+        }
           if (args[0] === "payment") {
             const [orderId, serverId] = args.slice(1);
             await PaymentHandler.handlePaymentVerification(

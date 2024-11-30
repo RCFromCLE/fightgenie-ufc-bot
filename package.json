@@ -14,12 +14,15 @@
         "axios": "^1.7.7",
         "axios-retry": "^4.5.0",
         "cheerio": "^1.0.0",
+        "cors": "^2.8.5",
         "date-fns": "^4.1.0",
         "discord.js": "^14.14.1",
         "dotenv": "^16.4.5",
+        "express": "^4.21.1",
         "openai": "^4.68.4",
         "qrcode": "^1.5.4",
-        "sqlite3": "^5.1.7"
+        "sqlite3": "^5.1.7",
+        "stripe": "^17.4.0"
     },
     "devDependencies": {
         "nodemon": "^3.0.3"
