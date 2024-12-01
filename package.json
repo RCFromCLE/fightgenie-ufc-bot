@@ -19,10 +19,12 @@
         "discord.js": "^14.14.1",
         "dotenv": "^16.4.5",
         "express": "^4.21.1",
-        "openai": "^4.68.4",
+        "node-schedule": "^2.1.1",
+        "openai": "^4.73.1",
         "qrcode": "^1.5.4",
         "sqlite3": "^5.1.7",
-        "stripe": "^17.4.0"
+        "stripe": "^17.4.0",
+        "twitter-api-v2": "^1.18.2"
     },
     "devDependencies": {
         "nodemon": "^3.0.3"

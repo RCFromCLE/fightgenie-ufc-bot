@@ -14,7 +14,7 @@ class ModelCommand {
 
             this.currentModel = model;
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
-            const modelName = model === 'gpt' ? 'GPT-4' : 'Claude';
+            const modelName = model === 'gpt' ? 'GPT-4o' : 'Claude-3.5';
 
             const embed = new EmbedBuilder()
                 .setColor('#0099ff')
@@ -36,7 +36,7 @@ class ModelCommand {
         try {
             const [_, model, eventId] = interaction.customId.split('_');
 
-            if (!['claude', 'gpt'].includes(model)) {
+            if (!['Claude-3.5', 'gpt'].includes(model)) {
                 await interaction.reply({
                     content: 'Invalid model selection.',
                     ephemeral: true
@@ -46,7 +46,7 @@ class ModelCommand {
 
             this.currentModel = model;
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
-            const modelName = model === 'gpt' ? 'GPT-4' : 'Claude';
+            const modelName = model === 'gpt' ? 'GPT-4o' : 'Claude-3.5';
 
             await interaction.reply({
                 content: `Model switched to ${modelName} ${modelEmoji}`,
