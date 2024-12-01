@@ -236,7 +236,7 @@ class PaymentModel {
                 '• Betting Analysis & Tips',
                 '• Fight Genie Parlays & Value Picks',
                 '',
-                'Use $upcoming to start viewing predictions and analysis!'
+                'Move to your Discord server and use $upcoming to start viewing predictions and analysis!'
             ].join('\n'));
 
         await interaction.editReply({

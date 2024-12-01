@@ -62,7 +62,7 @@ class CheckStatsCommand {
                 .setColor('#0099ff')
                 .setTitle('🤖 Fight Genie Model Performance')
                 .setDescription([
-                    'Compare how GPT-4 and Claude perform head-to-head in UFC predictions.',
+                    'Compare how GPT-4o and Claude-3.5 perform head-to-head in UFC predictions.',
                     'Data from verified fight outcomes and predictions.',
                     '',
                     '━━━━━━━━━━━━━━━━━━━━━━'
@@ -70,7 +70,7 @@ class CheckStatsCommand {
                 .setThumbnail("attachment://FightGenie_Logo_1.PNG");
 
             stats.forEach(stat => {
-                const modelName = stat.model_used === 'gpt' ? 'GPT-4' : 'Claude';
+                const modelName = stat.model_used === 'gpt' ? 'GPT-4o' : 'Claude-3.5';
                 const emoji = stat.model_used === 'gpt' ? '🧠' : '🤖';
                 
                 embed.addFields({

@@ -39,44 +39,47 @@ class SolanaPaymentService {
             if (!this.MERCHANT_WALLET) {
                 throw new Error('Merchant wallet not configured');
             }
-
+    
             if (!serverId) {
                 throw new Error('Server ID is required');
             }
-
+    
             if (!paymentType) {
                 throw new Error('Payment type is required');
             }
-
+    
             const intermediateWallet = Keypair.generate();
             const intermediatePublicKey = intermediateWallet.publicKey.toString();
             const paymentId = `SOL-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
-            // Get USD amount based on payment type
+    
+            // Fix the payment type mapping
             let usdAmount;
+            let dbPaymentType;
             switch(paymentType.toUpperCase()) {
                 case 'LIFETIME':
                     usdAmount = 50.00;
+                    dbPaymentType = 'SERVER_LIFETIME';  // Changed from just 'LIFETIME'
                     break;
                 case 'EVENT':
                     usdAmount = 6.99;
+                    dbPaymentType = 'SERVER_EVENT';     // Changed from just 'EVENT'
                     break;
                 default:
                     throw new Error(`Invalid payment type: ${paymentType}`);
             }
-
+    
             // Get current SOL price and calculate amount with discount
             const discountedAmount = await SolanaPriceService.getPriceWithDiscount(usdAmount);
-
+    
             console.log('Payment calculation:', {
-                paymentType,
+                paymentType: dbPaymentType,  // Log the correct payment type
                 usdAmount,
                 solAmount: discountedAmount
             });
-
+    
             const expirationTime = new Date();
             expirationTime.setMinutes(expirationTime.getMinutes() + this.PAYMENT_EXPIRY_MINUTES);
-
+    
             await database.query(`
                 INSERT INTO solana_payments (
                     payment_id,
@@ -96,31 +99,32 @@ class SolanaPaymentService {
                 serverId,
                 discountedAmount,
                 'PENDING',
-                paymentType.toUpperCase(),
+                dbPaymentType,           // Using the correct payment type here
                 expirationTime.toISOString()
             ]);
-
+    
             console.log('Generated payment request:', {
                 paymentId,
                 address: intermediatePublicKey,
                 amount: discountedAmount,
                 serverId,
-                paymentType,
+                paymentType: dbPaymentType,  // Log the correct payment type
                 expiresAt: expirationTime
             });
-
+    
             return {
                 paymentId,
                 address: intermediatePublicKey,
                 amount: discountedAmount,
                 expiresAt: expirationTime
             };
-
+    
         } catch (error) {
             console.error('Error generating payment address:', error);
             throw error;
         }
     }
+    
     static async verifyPayment(paymentId) {
         try {
             console.log('Verifying payment:', paymentId);

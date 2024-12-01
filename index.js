@@ -28,6 +28,8 @@ const AdminEventCommand = require("./src/commands/AdminEventCommand");
 const PromoCommand = require('./src/commands/PromoCommand');
 const MarketAnalysis = require("./src/utils/MarketAnalysis");
 const StripePaymentService = require("./src/utils/StripePaymentService");
+const TweetAutomation = require("./src/utils/TweetAutomation");
+const AdminPredictionCommand = require('./src/commands/AdminPredictionCommand');
 
 const COMMAND_PREFIX = "$";
 
@@ -71,7 +73,13 @@ function checkEnvironmentVariables() {
 
     // Solana Configuration
     "SOLANA_RPC_URL",
-    "SOLANA_MERCHANT_WALLET"
+    "SOLANA_MERCHANT_WALLET",
+
+    // Twitter Configuration
+    "TWITTER_API_KEY",
+    "TWITTER_API_SECRET",
+    "TWITTER_ACCESS_TOKEN",
+    "TWITTER_ACCESS_SECRET"
 
   ];
 
@@ -177,8 +185,34 @@ client.on("messageCreate", async (message) => {
 
   const freeCommands = ["help", "buy"];
 
+  // In your index.js or where you handle commands:
+  if (command === 'testpost') {
+    if (!message.member?.permissions.has("Administrator")) {
+      await message.reply("❌ This command requires administrator permissions.");
+      return;
+    }
+
+    await message.reply("🔄 Generating test posts...");
+    const tweetBot = new TweetAutomation();
+    await tweetBot.generateTestPosts();
+  }
+
   try {
     switch (command) {
+
+      case "syncpredictions":
+    if (message.guild?.id !== "496121279712329756") {
+        console.log(`Unauthorized syncpredictions attempt from guild ${message.guild?.id}`);
+        return;
+    }
+    if (!message.member?.permissions.has("Administrator")) {
+        await message.reply("❌ This command requires administrator permissions.");
+        return;
+    }
+    await AdminPredictionCommand.handleSyncPredictions(message);
+    break;
+
+
       case "promo":
         await PromoCommand.handlePromoCommand(message, args);
         break;
@@ -456,7 +490,7 @@ client.on("interactionCreate", async (interaction) => {
           if (args[0] === 'stripe') {
             await StripePaymentService.handleVerificationButton(interaction);
             return;
-        }
+          }
           if (args[0] === "payment") {
             const [orderId, serverId] = args.slice(1);
             await PaymentHandler.handlePaymentVerification(
@@ -502,28 +536,28 @@ client.on("interactionCreate", async (interaction) => {
             eventId
           );
           break;
-          
 
-          case 'market_analysis': {
-            const eventId = args[0];
-            try {
-                if (!interaction.deferred && !interaction.replied) {
-                    await interaction.deferUpdate();
-                }
-        
-                const event = await EventHandlers.getUpcomingEvent();
-                if (!event) {
-                    await interaction.editReply({
-                        content: "No upcoming events found.",
-                        ephemeral: true
-                    });
-                    return;
-                }
-        
-                const currentModel = ModelCommand.getCurrentModel();
-                
-                // First check if we have recent analysis stored
-                const storedAnalysis = await database.query(`
+
+        case 'market_analysis': {
+          const eventId = args[0];
+          try {
+            if (!interaction.deferred && !interaction.replied) {
+              await interaction.deferUpdate();
+            }
+
+            const event = await EventHandlers.getUpcomingEvent();
+            if (!event) {
+              await interaction.editReply({
+                content: "No upcoming events found.",
+                ephemeral: true
+              });
+              return;
+            }
+
+            const currentModel = ModelCommand.getCurrentModel();
+
+            // First check if we have recent analysis stored
+            const storedAnalysis = await database.query(`
                     SELECT analysis_data, created_at
                     FROM market_analysis
                     WHERE event_id = ? 
@@ -531,43 +565,43 @@ client.on("interactionCreate", async (interaction) => {
                     AND created_at > datetime('now', '-1 hour')
                     ORDER BY created_at DESC LIMIT 1
                 `, [event.event_id, currentModel]);
-        
-                let marketAnalysis;
-                let oddsData;
-        
-                if (storedAnalysis?.length > 0) {
-                    console.log('Using stored market analysis');
-                    marketAnalysis = JSON.parse(storedAnalysis[0].analysis_data);
-                    oddsData = marketAnalysis.oddsData;
-                } else {
-                    console.log('Generating new market analysis');
-                    // Get predictions and odds
-                    const [mainCardPredictions, prelimPredictions, freshOddsData] = await Promise.all([
-                        PredictionHandler.getStoredPrediction(event.event_id, "main", currentModel),
-                        PredictionHandler.getStoredPrediction(event.event_id, "prelims", currentModel),
-                        OddsAnalysis.fetchUFCOdds()
-                    ]);
-        
-                    // Process fights and find best value plays
-                    const allFights = [...(mainCardPredictions?.fights || []), ...(prelimPredictions?.fights || [])];
-                    oddsData = freshOddsData;
-        
-                    // Calculate edges and sort by value
-                    const processedFights = allFights.map(fight => {
-                        const odds = OddsAnalysis.getFightOdds(fight, oddsData, 'fanduel');
-                        const impliedProb = odds ? OddsAnalysis.calculateImpliedProbability(
-                            fight.predictedWinner === fight.fighter1 ? odds.fighter1?.price : odds.fighter2?.price
-                        ) : 0;
-                        return {
-                            ...fight,
-                            impliedProbability: impliedProb,
-                            edge: fight.confidence - impliedProb,
-                            valueRating: MarketAnalysis.calculateValueRating(fight.confidence - impliedProb)
-                        };
-                    });
-        
-                    // Store the analysis
-                    await database.query(`
+
+            let marketAnalysis;
+            let oddsData;
+
+            if (storedAnalysis?.length > 0) {
+              console.log('Using stored market analysis');
+              marketAnalysis = JSON.parse(storedAnalysis[0].analysis_data);
+              oddsData = marketAnalysis.oddsData;
+            } else {
+              console.log('Generating new market analysis');
+              // Get predictions and odds
+              const [mainCardPredictions, prelimPredictions, freshOddsData] = await Promise.all([
+                PredictionHandler.getStoredPrediction(event.event_id, "main", currentModel),
+                PredictionHandler.getStoredPrediction(event.event_id, "prelims", currentModel),
+                OddsAnalysis.fetchUFCOdds()
+              ]);
+
+              // Process fights and find best value plays
+              const allFights = [...(mainCardPredictions?.fights || []), ...(prelimPredictions?.fights || [])];
+              oddsData = freshOddsData;
+
+              // Calculate edges and sort by value
+              const processedFights = allFights.map(fight => {
+                const odds = OddsAnalysis.getFightOdds(fight, oddsData, 'fanduel');
+                const impliedProb = odds ? OddsAnalysis.calculateImpliedProbability(
+                  fight.predictedWinner === fight.fighter1 ? odds.fighter1?.price : odds.fighter2?.price
+                ) : 0;
+                return {
+                  ...fight,
+                  impliedProbability: impliedProb,
+                  edge: fight.confidence - impliedProb,
+                  valueRating: MarketAnalysis.calculateValueRating(fight.confidence - impliedProb)
+                };
+              });
+
+              // Store the analysis
+              await database.query(`
                         INSERT INTO market_analysis (
                             event_id,
                             model_used,
@@ -575,145 +609,145 @@ client.on("interactionCreate", async (interaction) => {
                             created_at
                         ) VALUES (?, ?, ?, datetime('now'))
                     `, [
-                        event.event_id,
-                        currentModel,
-                        JSON.stringify({
-                            processedFights,
-                            oddsData,
-                            timestamp: new Date().toISOString()
-                        })
-                    ]);
-        
-                    marketAnalysis = { processedFights, oddsData };
-                }
-        
-                // Get top value plays (edge > 10% and confidence > 65%)
-                const topValuePlays = marketAnalysis.processedFights
-                    .filter(fight => fight.edge > 10 && fight.confidence > 65)
-                    .sort((a, b) => b.edge - a.edge)
-                    .slice(0, 3);
-        
-                // Best main card and prelim picks
-                const mainCardPicks = marketAnalysis.processedFights
-                    .filter(fight => fight.is_main_card === 1 && fight.edge > 7.5)
-                    .sort((a, b) => b.confidence - a.confidence)
-                    .slice(0, 2);
-        
-                const prelimPicks = marketAnalysis.processedFights
-                    .filter(fight => fight.is_main_card === 0 && fight.edge > 7.5)
-                    .sort((a, b) => b.confidence - a.confidence)
-                    .slice(0, 2);
-        
-                const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
-                const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
-        
-                // Create main analysis embed
-                const marketAnalysisEmbed = new EmbedBuilder()
-                    .setColor("#00ff00")
-                    .setTitle(`🎯 UFC Market Intelligence Report ${modelEmoji}`)
-                    .setDescription([
-                        `*Advanced Analysis by ${modelName} Fight Analytics* | *Coming Soon* | *Still in Development*`,
-                        `Event: ${event.Event}`,
-                        `Date: ${new Date(event.Date).toLocaleDateString()}`,
-                        "",
-                        "Last Updated: " + new Date().toLocaleString(),
-                        "\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                    ].join('\n'))
-                    .addFields(
-                        {
-                            name: "💎 Top Value Plays",
-                            value: topValuePlays.map(fight => 
-                              `${getValueStars(fight.edge)} ${fight.predictedWinner} (${fight.confidence}% vs ${fight.impliedProbability.toFixed(1)}% implied)\n` +
-                              `└ Edge: ${fight.edge.toFixed(1)}% | Method: ${fight.method}`
-                          ).join('\n\n') || "No significant value plays found",
-                          inline: false
-                        },
-                        {
-                            name: "🎯 Best Main Card Picks",
-                            value: mainCardPicks.map(fight => 
-                                `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
-                                `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
-                            ).join('\n\n') || "No strong main card picks",
-                            inline: false
-                        },
-                        {
-                            name: "🥊 Best Prelim Picks",
-                            value: prelimPicks.map(fight => 
-                                `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
-                                `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
-                            ).join('\n\n') || "No strong prelim picks",
-                            inline: false
-                        }
-                    );
-        
-                // Create explanation embed
-                const explanationEmbed = new EmbedBuilder()
-                    .setColor("#0099ff")
-                    .setTitle("🎓 Understanding Value Ratings")
-                    .addFields(
-                        {
-                            name: "⭐ Star Rating System",
-                            value: [
-                                "⭐⭐⭐⭐⭐ = Elite Value (20%+ edge)",
-                                "⭐⭐⭐⭐ = Strong Value (15%+ edge)",
-                                "⭐⭐⭐ = Good Value (10%+ edge)",
-                                "⭐⭐ = Decent Value (7.5%+ edge)",
-                                "⭐ = Slight Value (5%+ edge)",
-                                "",
-                                "**How We Calculate Edge:**",
-                                "Edge = Our Confidence - Implied Probability",
-                                "Example: 70% confidence vs 55% implied = 15% edge"
-                            ].join('\n'),
-                            inline: false
-                        }
-                    );
-        
-                const navigationRow = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`predict_main_${currentModel}_${event.event_id}`)
-                            .setLabel("Back to AI Predictions")
-                            .setEmoji("📊")
-                            .setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder()
-                            .setCustomId(`betting_analysis_${event.event_id}`)
-                            .setLabel("AI Betting Analysis")
-                            .setEmoji("💰")
-                            .setStyle(ButtonStyle.Success)
-                    );
-        
-                await interaction.editReply({
-                    embeds: [marketAnalysisEmbed, explanationEmbed],
-                    components: [navigationRow],
-                    files: [{
-                        attachment: "./src/images/FightGenie_Logo_1.PNG",
-                        name: "FightGenie_Logo_1.PNG"
-                    }]
-                });
-        
-            } catch (error) {
-                console.error("Error displaying market analysis:", error);
-                await interaction.editReply({
-                    content: "Error generating market analysis. Please try again.",
-                    ephemeral: true
-                });
-            }
-            break;
+                event.event_id,
+                currentModel,
+                JSON.stringify({
+                  processedFights,
+                  oddsData,
+                  timestamp: new Date().toISOString()
+                })
+              ]);
 
-// Add helper function for star ratings
-function getValueStars(edge) {
-  if (edge >= 20) return "⭐⭐⭐⭐⭐";
-  if (edge >= 15) return "⭐⭐⭐⭐";
-  if (edge >= 10) return "⭐⭐⭐";
-  if (edge >= 7.5) return "⭐⭐";
-  if (edge >= 5) return "⭐";
-  return "";
-}
+              marketAnalysis = { processedFights, oddsData };
+            }
+
+            // Get top value plays (edge > 10% and confidence > 65%)
+            const topValuePlays = marketAnalysis.processedFights
+              .filter(fight => fight.edge > 10 && fight.confidence > 65)
+              .sort((a, b) => b.edge - a.edge)
+              .slice(0, 3);
+
+            // Best main card and prelim picks
+            const mainCardPicks = marketAnalysis.processedFights
+              .filter(fight => fight.is_main_card === 1 && fight.edge > 7.5)
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 2);
+
+            const prelimPicks = marketAnalysis.processedFights
+              .filter(fight => fight.is_main_card === 0 && fight.edge > 7.5)
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 2);
+
+            const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
+            const modelName = currentModel === "gpt" ? "GPT-4o" : "Claude-3.5";
+
+            // Create main analysis embed
+            const marketAnalysisEmbed = new EmbedBuilder()
+              .setColor("#00ff00")
+              .setTitle(`🎯 UFC Market Intelligence Report ${modelEmoji}`)
+              .setDescription([
+                `*Advanced Analysis by ${modelName} Fight Analytics* | *Coming Soon* | *Still in Development*`,
+                `Event: ${event.Event}`,
+                `Date: ${new Date(event.Date).toLocaleDateString()}`,
+                "",
+                "Last Updated: " + new Date().toLocaleString(),
+                "\n━━━━━━━━━━━━━━━━━━━━━━\n"
+              ].join('\n'))
+              .addFields(
+                {
+                  name: "💎 Top Value Plays",
+                  value: topValuePlays.map(fight =>
+                    `${getValueStars(fight.edge)} ${fight.predictedWinner} (${fight.confidence}% vs ${fight.impliedProbability.toFixed(1)}% implied)\n` +
+                    `└ Edge: ${fight.edge.toFixed(1)}% | Method: ${fight.method}`
+                  ).join('\n\n') || "No significant value plays found",
+                  inline: false
+                },
+                {
+                  name: "🎯 Best Main Card Picks",
+                  value: mainCardPicks.map(fight =>
+                    `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
+                    `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
+                  ).join('\n\n') || "No strong main card picks",
+                  inline: false
+                },
+                {
+                  name: "🥊 Best Prelim Picks",
+                  value: prelimPicks.map(fight =>
+                    `${this.getValueStars(fight.edge)} ${fight.predictedWinner}\n` +
+                    `└ ${fight.method} (${fight.confidence}% conf) | Edge: ${fight.edge.toFixed(1)}%`
+                  ).join('\n\n') || "No strong prelim picks",
+                  inline: false
+                }
+              );
+
+            // Create explanation embed
+            const explanationEmbed = new EmbedBuilder()
+              .setColor("#0099ff")
+              .setTitle("🎓 Understanding Value Ratings")
+              .addFields(
+                {
+                  name: "⭐ Star Rating System",
+                  value: [
+                    "⭐⭐⭐⭐⭐ = Elite Value (20%+ edge)",
+                    "⭐⭐⭐⭐ = Strong Value (15%+ edge)",
+                    "⭐⭐⭐ = Good Value (10%+ edge)",
+                    "⭐⭐ = Decent Value (7.5%+ edge)",
+                    "⭐ = Slight Value (5%+ edge)",
+                    "",
+                    "**How We Calculate Edge:**",
+                    "Edge = Our Confidence - Implied Probability",
+                    "Example: 70% confidence vs 55% implied = 15% edge"
+                  ].join('\n'),
+                  inline: false
+                }
+              );
+
+            const navigationRow = new ActionRowBuilder()
+              .addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`predict_main_${currentModel}_${event.event_id}`)
+                  .setLabel("Back to AI Predictions")
+                  .setEmoji("📊")
+                  .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                  .setCustomId(`betting_analysis_${event.event_id}`)
+                  .setLabel("AI Betting Analysis")
+                  .setEmoji("💰")
+                  .setStyle(ButtonStyle.Success)
+              );
+
+            await interaction.editReply({
+              embeds: [marketAnalysisEmbed, explanationEmbed],
+              components: [navigationRow],
+              files: [{
+                attachment: "./src/images/FightGenie_Logo_1.PNG",
+                name: "FightGenie_Logo_1.PNG"
+              }]
+            });
+
+          } catch (error) {
+            console.error("Error displaying market analysis:", error);
+            await interaction.editReply({
+              content: "Error generating market analysis. Please try again.",
+              ephemeral: true
+            });
+          }
+          break;
+
+          // Add helper function for star ratings
+          function getValueStars(edge) {
+            if (edge >= 20) return "⭐⭐⭐⭐⭐";
+            if (edge >= 15) return "⭐⭐⭐⭐";
+            if (edge >= 10) return "⭐⭐⭐";
+            if (edge >= 7.5) return "⭐⭐";
+            if (edge >= 5) return "⭐";
+            return "";
+          }
 
 
         }
 
-        
+
         case "prev":
         case "next":
         case "analysis":
@@ -951,17 +985,17 @@ function createHelpEmbed() {
       },
 
       {
-        name: "🤖 $model [claude/gpt]",
+        name: "🤖 $model [Claude-3.5/gpt]",
 
         value:
-          "```Switch between Claude and GPT-4 for predictions\nDefault: GPT-4```",
+          "```Switch between Claude-3.5 and GPT-4o for predictions\nDefault: GPT-4o```",
       },
 
       {
         name: "📊 $stats",
 
         value:
-          "```Compare prediction accuracy between Claude and GPT-4 models\nUpdated the following day after each event```",
+          "```Compare prediction accuracy between Claude-3.5 and GPT-4o models\nUpdated the following day after each event```",
       },
 
       {
@@ -973,7 +1007,7 @@ function createHelpEmbed() {
     )
 
     .setFooter({
-      text: "Data from UFCStats.com | Powered by Claude & GPT-4 | Fight Genie 1.0",
+      text: "Data from UFCStats.com | Powered by Claude-3.5 & GPT-4o | Fight Genie 1.0",
 
       iconURL:
         "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",

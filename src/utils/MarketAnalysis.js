@@ -91,8 +91,7 @@ class MarketAnalysis {
             console.error('Error generating market analysis:', error);
             throw error;
         }
-    }
-        
+    }    
     static async getAllFights(eventId, model) {
         try {
             const [mainCard, prelims] = await Promise.all([

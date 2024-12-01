@@ -103,7 +103,7 @@ class EventHandlers {
 
       const currentModel = ModelCommand.getCurrentModel() || "gpt";
       const modelName =
-        currentModel.toLowerCase() === "gpt" ? "GPT-4" : "Claude";
+        currentModel.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5";
 
       // Split fights into main card and prelims
       const mainCard = fights.filter((f) => f.is_main_card === 1);
@@ -120,7 +120,7 @@ class EventHandlers {
       );
 
       const eventTime = eventDetails[0]?.event_time || "TBD";
-      const eventDate = new Date(eventDetails[0]?.Date);
+      const eventDate = new Date(new Date(eventDetails[0]?.Date).getTime() + (24 * 60 * 60 * 1000));
 
       const embed = new EmbedBuilder()
         .setColor("#0099ff")
@@ -162,13 +162,11 @@ class EventHandlers {
           name: fight.WeightClass || "Weight Class TBD",
           value: [
             `👊 **${fight.fighter1}** (${fighter1Record})`,
-            `${fighter1Stats?.Stance || "Orthodox"} | ${
-              fighter1Stats?.Reach || "??"
+            `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
             }" reach`,
             "⚔️",
             `**${fight.fighter2}** (${fighter2Record})`,
-            `${fighter2Stats?.Stance || "Orthodox"} | ${
-              fighter2Stats?.Reach || "??"
+            `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
             }" reach`,
           ].join("\n"),
           inline: false,
@@ -196,13 +194,11 @@ class EventHandlers {
             name: fight.WeightClass || "Weight Class TBD",
             value: [
               `👊 **${fight.fighter1}** (${fighter1Record})`,
-              `${fighter1Stats?.Stance || "Orthodox"} | ${
-                fighter1Stats?.Reach || "??"
+              `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
               }" reach`,
               "⚔️",
               `**${fight.fighter2}** (${fighter2Record})`,
-              `${fighter2Stats?.Stance || "Orthodox"} | ${
-                fighter2Stats?.Reach || "??"
+              `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
               }" reach`,
             ].join("\n"),
             inline: false,
@@ -249,9 +245,8 @@ class EventHandlers {
         ),
       ]);
 
-      return `${wins[0]?.count || 0}-${losses[0]?.count || 0}-${
-        draws[0]?.count || 0
-      }`;
+      return `${wins[0]?.count || 0}-${losses[0]?.count || 0}-${draws[0]?.count || 0
+        }`;
     } catch (error) {
       console.error(`Error getting record for ${fighterName}:`, error);
       return "0-0-0";
@@ -432,9 +427,8 @@ class EventHandlers {
         ),
       ]);
 
-      return `${wins[0]?.count || 0}-${losses[0]?.count || 0}-${
-        draws[0]?.count || 0
-      }`;
+      return `${wins[0]?.count || 0}-${losses[0]?.count || 0}-${draws[0]?.count || 0
+        }`;
     } catch (error) {
       console.error(`Error getting record for ${fighterName}:`, error);
       return "0-0-0";
@@ -522,7 +516,7 @@ class EventHandlers {
 
       const currentModel = ModelCommand.getCurrentModel() || "gpt";
       const modelName =
-        currentModel.toLowerCase() === "gpt" ? "GPT-4" : "Claude Sonnet";
+        currentModel.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5 Sonnet";
 
       // Split fights into main card and prelims
       const mainCard = fights.filter((f) => f.is_main_card === 1);
@@ -539,14 +533,13 @@ class EventHandlers {
       );
 
       const eventTime = eventDetails[0]?.event_time || "3 PM PST";
-      const eventDate = new Date(eventDetails[0]?.Date);
+      const eventDate = new Date(new Date(eventDetails[0]?.Date).getTime() + (24 * 60 * 60 * 1000));
 
       // Create base embed
       const embed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle(
-          `🥊 UFC 310: ${mainCard[0]?.fighter1 || ""} vs. ${
-            mainCard[0]?.fighter2 || ""
+          `🥊 UFC 310: ${mainCard[0]?.fighter1 || ""} vs. ${mainCard[0]?.fighter2 || ""
           }`
         )
         .setDescription(
@@ -568,7 +561,7 @@ class EventHandlers {
         )
         .setThumbnail("attachment://FightGenie_Logo_1.PNG")
         .setFooter({
-          text: `Fight Genie 1.0  |  💳 PayPal • ⚡ Solana  |  Current Model: ${modelName}`,
+          text: `Fight Genie 1.0  |  🅿️ PayPal • ⚡ Solana • 🍎 Apple Pay • 💳 All Cards  |  Current Model: ${modelName}`,
           iconURL: "attachment://FightGenie_Logo_1.PNG",
         });
 
@@ -586,13 +579,11 @@ class EventHandlers {
           name: `\n${fight.WeightClass || "Weight Class TBD"}`,
           value: [
             `👊 **${fight.fighter1}** (${fighter1Record})`,
-            `${fighter1Stats?.Stance || "Orthodox"} | ${
-              fighter1Stats?.Reach || "??"
+            `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
             }" reach | ${this.calculateAge(fighter1Stats?.DOB) || "??"} yrs`,
             "⚔️",
             `**${fight.fighter2}** (${fighter2Record})`,
-            `${fighter2Stats?.Stance || "Orthodox"} | ${
-              fighter2Stats?.Reach || "??"
+            `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
             }" reach | ${this.calculateAge(fighter2Stats?.DOB) || "??"} yrs\n`,
           ].join("\n"),
           inline: false,
@@ -620,15 +611,12 @@ class EventHandlers {
             name: fight.WeightClass || "Weight Class TBD",
             value: [
               `👊 **${fight.fighter1}** (${fighter1Record})`,
-              `${fighter1Stats?.Stance || "Orthodox"} | ${
-                fighter1Stats?.Reach || "??"
+              `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
               }" reach | ${this.calculateAge(fighter1Stats?.DOB) || "??"} yrs`,
               "⚔️",
               `**${fight.fighter2}** (${fighter2Record})`,
-              `${fighter2Stats?.Stance || "Orthodox"} | ${
-                fighter2Stats?.Reach || "??"
-              }" reach | ${
-                this.calculateAge(fighter2Stats?.DOB) || "??"
+              `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
+              }" reach | ${this.calculateAge(fighter2Stats?.DOB) || "??"
               } yrs\n`,
             ].join("\n"),
             inline: false,
@@ -684,8 +672,7 @@ class EventHandlers {
       const response = await this.createEventEmbed(event, !prelimsShown);
 
       console.log(
-        `Toggling prelims - Current state: ${
-          prelimsShown ? "shown" : "hidden"
+        `Toggling prelims - Current state: ${prelimsShown ? "shown" : "hidden"
         }, New state: ${!prelimsShown ? "shown" : "hidden"}`
       );
 
@@ -700,36 +687,36 @@ class EventHandlers {
   }
 
   static async createNavigationButtons(event, showPrelims, fights) {
-      const currentModel = ModelCommand.getCurrentModel() || "gpt";
-      const components = [];
-    
-      // First row with main action buttons
-      const buttonRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`toggle_prelims_${event.event_id || "latest"}`)
-          .setLabel(showPrelims ? "Hide Prelims" : "Show Prelims")
-          .setEmoji("👁️")
-          .setStyle(ButtonStyle.Success),
-    
-        new ButtonBuilder()
-          .setCustomId(
-            `predict_main_${currentModel}_${event.event_id || "latest"}`
-          )
-          .setLabel("AI Main Card Predictions")
-          .setEmoji("🎯")
-          .setStyle(ButtonStyle.Primary)
-      );
-    
-      // Add the "Full Analysis" button
-      buttonRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`get_analysis_${event.event_id || "latest"}`)
-          .setLabel("Full Analysis")
-          .setEmoji("📈")
-          .setStyle(ButtonStyle.Primary)
-      );
-    
-      components.push(buttonRow);
+    const currentModel = ModelCommand.getCurrentModel() || "gpt";
+    const components = [];
+
+    // First row with main action buttons
+    const buttonRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`toggle_prelims_${event.event_id || "latest"}`)
+        .setLabel(showPrelims ? "Hide Prelims" : "Show Prelims")
+        .setEmoji("👁️")
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId(
+          `predict_main_${currentModel}_${event.event_id || "latest"}`
+        )
+        .setLabel(`${modelName} Main Card Predictions`)
+        .setEmoji("🎯")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    // Add the "Full Analysis" button
+    buttonRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`get_analysis_${event.event_id || "latest"}`)
+        .setLabel(`DM ${modelName} Full Analysis`)
+        .setEmoji("📈")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    components.push(buttonRow);
 
     // Get main card fighters
     const mainCardFighters = fights
@@ -838,10 +825,8 @@ class EventHandlers {
       .setColor("#0099ff")
       .setTitle(`🥊 ${event.Event}`)
       .setDescription(
-        `📅 ${estTime}\n📍 ${event.City}${
-          event.State ? `, ${event.State}` : ""
-        }, ${
-          event.Country
+        `📅 ${estTime}\n📍 ${event.City}${event.State ? `, ${event.State}` : ""
+        }, ${event.Country
         }\n\n💡 Records shown are UFC fights only.\nData from: ufcstats.com`
       )
       .setThumbnail(
@@ -868,11 +853,9 @@ class EventHandlers {
 
       // Add odds if available
       if (fightOdds?.fighter1 && fightOdds?.fighter2) {
-        displayValue += `\n\n📈 FanDuel Odds:\n${
-          fight.fighter1
-        }: ${OddsAnalysis.formatAmericanOdds(fightOdds.fighter1.price)}\n${
-          fight.fighter2
-        }: ${OddsAnalysis.formatAmericanOdds(fightOdds.fighter2.price)}`;
+        displayValue += `\n\n📈 FanDuel Odds:\n${fight.fighter1
+          }: ${OddsAnalysis.formatAmericanOdds(fightOdds.fighter1.price)}\n${fight.fighter2
+          }: ${OddsAnalysis.formatAmericanOdds(fightOdds.fighter2.price)}`;
       }
 
       return displayValue;
@@ -939,7 +922,7 @@ class EventHandlers {
         return;
       }
 
-      const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
+      const modelName = currentModel === "gpt" ? "GPT-4o" : "Claude-3.5";
       const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
 
       const bettingEmbed = new EmbedBuilder()
@@ -1164,6 +1147,7 @@ class EventHandlers {
 
   static async createNavigationButtons(event, showPrelims, fights) {
     const currentModel = ModelCommand.getCurrentModel() || "gpt";
+    const modelName = currentModel.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5";
     const components = [];
 
     // Force boolean value for showPrelims and log the state
@@ -1185,7 +1169,7 @@ class EventHandlers {
         .setCustomId(
           `predict_main_${currentModel}_${event.event_id || "latest"}`
         )
-        .setLabel("AI Main Card Predictions")
+        .setLabel(`${modelName} Main Card Predictions`)
         .setEmoji("🎯")
         .setStyle(ButtonStyle.Primary)
     );
@@ -1303,396 +1287,459 @@ class EventHandlers {
 
   static async displayBettingAnalysis(interaction, eventId) {
     try {
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferUpdate();
-        }
- 
-        const event = await this.getUpcomingEvent();
-        if (!event) {
-            await interaction.editReply({content: "No upcoming events found.", ephemeral: true});
-            return;
-        }
- 
-        const currentModel = ModelCommand.getCurrentModel();
-        const modelName = currentModel === "gpt" ? "GPT-4" : "Claude";
-        const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
- 
-        // Get predictions and odds
-        const [mainCardPredictions, prelimPredictions, oddsData] = await Promise.all([
-            PredictionHandler.getStoredPrediction(event.event_id, "main", currentModel),
-            PredictionHandler.getStoredPrediction(event.event_id, "prelims", currentModel),
-            OddsAnalysis.fetchUFCOdds()
-        ]);
- 
-        // Create embeds
-        const mainCardEmbed = new EmbedBuilder()
-            .setColor("#0099ff")
-            .setTitle(`💎 ${event.Event} - Main Card Parlays`)
-            .setDescription(`${modelEmoji} Data accuracy is subject to Fanduel Odds availability. If you see odds in the Fanduel app we are good.\n━━━━━━━━━━━━━━━━━━━━━━`);
- 
-        const prelimEmbed = new EmbedBuilder()
-            .setColor("#0099ff")
-            .setTitle(`💎 ${event.Event} - Preliminary Card Parlays`)
-            .setDescription(`${modelEmoji} Preliminary card parlay opportunities\n━━━━━━━━━━━━━━━━━━━━━━`);
- 
-        const crossCardEmbed = new EmbedBuilder()
-            .setColor("#0099ff")
-            .setTitle(`💎 ${event.Event} - Cross Card Parlays`)
-            .setDescription(`${modelEmoji} Premium parlays combining picks from both cards\n━━━━━━━━━━━━━━━━━━━━━━`);
- 
-        const valueEmbed = new EmbedBuilder()
-            .setColor("#0099ff")
-            .setTitle(`💎 ${event.Event} - Value Picks`)
-            .setDescription(`${modelEmoji} Underdog Oppurtunities \n━━━━━━━━━━━━━━━━━━━━━━`);
- 
-        console.log("Processing main card predictions:", {
-            hasPredictions: !!mainCardPredictions?.fights,
-            fightCount: mainCardPredictions?.fights?.length,
-            hasOdds: !!oddsData
-        });
- 
-        if (mainCardPredictions?.fights?.length > 0) {
-            await this.addMainCardParlays(mainCardEmbed, mainCardPredictions.fights, oddsData);
-        }
- 
-        console.log("Processing AI prelim predictions:", {
-            hasPredictions: !!prelimPredictions?.fights,
-            fightCount: prelimPredictions?.fights?.length
-        });
- 
-        if (prelimPredictions?.fights?.length > 0) {
-            await this.addPrelimParlays(prelimEmbed, prelimPredictions.fights, oddsData);
-        }
- 
-        if (mainCardPredictions?.fights?.length > 0 && prelimPredictions?.fights?.length > 0 && oddsData) {
-          console.log("Processing cross card parlays:", {
-              mainCardFights: mainCardPredictions.fights.length,
-              prelimFights: prelimPredictions.fights.length,
-              hasOdds: !!oddsData
-          });
-          
-          await this.addCrossCardParlays(
-              crossCardEmbed,
-              mainCardPredictions.fights,
-              prelimPredictions.fights,
-              oddsData
-          );
-      } else {
-          console.log("Skipping cross card parlays - insufficient data:", {
-              hasMainCard: !!mainCardPredictions?.fights,
-              hasPrelims: !!prelimPredictions?.fights,
-              hasOdds: !!oddsData
-          });
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
       }
 
-        const allFights = [
-            ...(mainCardPredictions?.fights || []),
-            ...(prelimPredictions?.fights || [])
-        ];
- 
-        if (allFights.length > 0) {
-            await this.addValuePlays(valueEmbed, allFights, oddsData);
-        }
- 
-        const legendEmbed = this.createBettingLegendEmbed();
- 
-        const navigationRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`show_event_${event.event_id}`)
-                    .setLabel('Back to Event')
-                    .setEmoji('↩️')
-                    .setStyle(ButtonStyle.Success),
-                new ButtonBuilder()
-                    .setCustomId('showcalculations')
-                    .setLabel('How We Calculate')
-                    .setEmoji('🧮')
-                    .setStyle(ButtonStyle.Primary)
-            );
- 
-        // Send all embeds with content checks
-        const validEmbeds = [
-            mainCardPredictions?.fights?.length > 0 ? mainCardEmbed : null,
-            prelimPredictions?.fights?.length > 0 ? prelimEmbed : null,
-            (mainCardPredictions?.fights?.length > 0 || prelimPredictions?.fights?.length > 0) ? crossCardEmbed : null,
-            allFights.length > 0 ? valueEmbed : null,
-            legendEmbed
-        ].filter(Boolean);
- 
-        if (validEmbeds.length === 0) {
-            await interaction.editReply({
-                content: 'No predictions available for betting analysis. Please generate predictions first.',
-                ephemeral: true
-            });
-            return;
-        }
- 
-        await interaction.editReply({
-            embeds: validEmbeds,
-            components: [navigationRow],
-            files: [{
-                attachment: './src/images/FightGenie_Logo_1.PNG',
-                name: 'FightGenie_Logo_1.PNG'
-            }]
+      const event = await this.getUpcomingEvent();
+      if (!event) {
+        await interaction.editReply({ content: "No upcoming events found.", ephemeral: true });
+        return;
+      }
+
+      const currentModel = ModelCommand.getCurrentModel();
+      const modelName = currentModel === "gpt" ? "GPT-4o" : "Claude-3.5";
+      const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
+
+      // Get predictions and odds
+      const [mainCardPredictions, prelimPredictions, oddsData] = await Promise.all([
+        PredictionHandler.getStoredPrediction(event.event_id, "main", currentModel),
+        PredictionHandler.getStoredPrediction(event.event_id, "prelims", currentModel),
+        OddsAnalysis.fetchUFCOdds()
+      ]);
+
+      // Create embeds
+      const mainCardEmbed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle(`💎 ${event.Event} - Main Card Parlays`)
+        .setDescription(`${modelEmoji} Data accuracy is subject to Fanduel Odds availability. If you see odds in the Fanduel app we are good.\n━━━━━━━━━━━━━━━━━━━━━━`);
+
+      const prelimEmbed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle(`💎 ${event.Event} - Preliminary Card Parlays`)
+        .setDescription(`${modelEmoji} Preliminary card parlay opportunities\n━━━━━━━━━━━━━━━━━━━━━━`);
+
+      const crossCardEmbed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle(`💎 ${event.Event} - Cross Card Parlays`)
+        .setDescription(`${modelEmoji} Premium parlays combining picks from both cards\n━━━━━━━━━━━━━━━━━━━━━━`);
+
+      const valueEmbed = new EmbedBuilder()
+        .setColor("#0099ff")
+        .setTitle(`💎 ${event.Event} - Value Picks`)
+        .setDescription(`${modelEmoji} Underdog Oppurtunities \n━━━━━━━━━━━━━━━━━━━━━━`);
+
+      console.log("Processing main card predictions:", {
+        hasPredictions: !!mainCardPredictions?.fights,
+        fightCount: mainCardPredictions?.fights?.length,
+        hasOdds: !!oddsData
+      });
+
+      if (mainCardPredictions?.fights?.length > 0) {
+        await this.addMainCardParlays(mainCardEmbed, mainCardPredictions.fights, oddsData);
+      }
+
+      console.log("Processing AI prelim predictions:", {
+        hasPredictions: !!prelimPredictions?.fights,
+        fightCount: prelimPredictions?.fights?.length
+      });
+
+      if (prelimPredictions?.fights?.length > 0) {
+        await this.addPrelimParlays(prelimEmbed, prelimPredictions.fights, oddsData);
+      }
+
+      if (mainCardPredictions?.fights?.length > 0 && prelimPredictions?.fights?.length > 0 && oddsData) {
+        console.log("Processing cross card parlays:", {
+          mainCardFights: mainCardPredictions.fights.length,
+          prelimFights: prelimPredictions.fights.length,
+          hasOdds: !!oddsData
         });
- 
+
+        await this.addCrossCardParlays(
+          crossCardEmbed,
+          mainCardPredictions.fights,
+          prelimPredictions.fights,
+          oddsData
+        );
+      } else {
+        console.log("Skipping cross card parlays - insufficient data:", {
+          hasMainCard: !!mainCardPredictions?.fights,
+          hasPrelims: !!prelimPredictions?.fights,
+          hasOdds: !!oddsData
+        });
+      }
+
+      const allFights = [
+        ...(mainCardPredictions?.fights || []),
+        ...(prelimPredictions?.fights || [])
+      ];
+
+      if (allFights.length > 0) {
+        await this.addValuePlays(valueEmbed, allFights, oddsData);
+      }
+
+      const legendEmbed = this.createBettingLegendEmbed();
+
+      const navigationRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`show_event_${event.event_id}`)
+            .setLabel('Back to Event')
+            .setEmoji('↩️')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('showcalculations')
+            .setLabel('How We Calculate')
+            .setEmoji('🧮')
+            .setStyle(ButtonStyle.Primary)
+        );
+
+      // Send all embeds with content checks
+      const validEmbeds = [
+        mainCardPredictions?.fights?.length > 0 ? mainCardEmbed : null,
+        prelimPredictions?.fights?.length > 0 ? prelimEmbed : null,
+        (mainCardPredictions?.fights?.length > 0 || prelimPredictions?.fights?.length > 0) ? crossCardEmbed : null,
+        allFights.length > 0 ? valueEmbed : null,
+        legendEmbed
+      ].filter(Boolean);
+
+      if (validEmbeds.length === 0) {
+        await interaction.editReply({
+          content: 'No predictions available for betting analysis. Please generate predictions first.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      await interaction.editReply({
+        embeds: validEmbeds,
+        components: [navigationRow],
+        files: [{
+          attachment: './src/images/FightGenie_Logo_1.PNG',
+          name: 'FightGenie_Logo_1.PNG'
+        }]
+      });
+
     } catch (error) {
-        console.error('Error displaying betting analysis:', error);
-        await interaction.editReply({
-            content: 'Error generating betting analysis. Please try again.',
-            ephemeral: true
-        });
+      console.error('Error displaying betting analysis:', error);
+      await interaction.editReply({
+        content: 'Error generating betting analysis. Please try again.',
+        ephemeral: true
+      });
     }
- }
+  }
 
-static async addMainCardParlays(embed, mainCardData, oddsData) {
+  static async addMainCardParlays(embed, mainCardData, oddsData) {
     const highConfPicks = mainCardData
-        .filter(fight => fight.confidence >= 70)
-        .sort((a, b) => b.confidence - a.confidence);
- 
-    if (highConfPicks.length >= 2) {
-        const twoFightStats = this.calculateParlayStats(highConfPicks.slice(0, 2), oddsData);
-        const threeFightStats = this.calculateParlayStats(highConfPicks.slice(0, 3), oddsData);
-        const fourFightStats = this.calculateParlayStats(highConfPicks.slice(0, 4), oddsData);
- 
-        embed.addFields({
-            name: "🎯 MAIN CARD PARLAYS",
-            value: [
-                "TWO-FIGHT MAIN CARD:",
-                ...highConfPicks.slice(0, 2).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(twoFightStats.confidenceProduct * 100).toFixed(1)}%`,
-                `└ Implied Probability: ${twoFightStats.impliedProbability}%`,
-                `└ Potential Return: ${twoFightStats.potentialReturn}`,
-                `└ Edge: ${twoFightStats.edge}%`,
-                `└ Rating: ${twoFightStats.rating}`,
-                "",
-                "THREE-FIGHT MAIN CARD:",
-                ...highConfPicks.slice(0, 3).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(threeFightStats.confidenceProduct * 100).toFixed(1)}%`, 
-                `└ Implied Probability: ${threeFightStats.impliedProbability}%`,
-                `└ Potential Return: ${threeFightStats.potentialReturn}`,
-                `└ Edge: ${threeFightStats.edge}%`,
-                `└ Rating: ${threeFightStats.rating}`,
-                "",
-                "FOUR-FIGHT MAIN CARD:",
-                ...highConfPicks.slice(0, 4).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(fourFightStats.confidenceProduct * 100).toFixed(1)}%`,
-                `└ Implied Probability: ${fourFightStats.impliedProbability}%`,
-                `└ Potential Return: ${fourFightStats.potentialReturn}`,
-                `└ Edge: ${fourFightStats.edge}%`,
-                `└ Rating: ${fourFightStats.rating}`
-            ].join('\n'),
-            inline: false
-        });
-    }
- }
- 
- static async addPrelimParlays(embed, prelimData, oddsData) {
-    const highConfPicks = prelimData
-        .filter(fight => fight.confidence >= 70)
-        .sort((a, b) => b.confidence - a.confidence);
- 
-    if (highConfPicks.length >= 2) {
-        const twoFightStats = this.calculateParlayStats(highConfPicks.slice(0, 2), oddsData);
-        const threeFightStats = this.calculateParlayStats(highConfPicks.slice(0, 3), oddsData);
-        const fourFightStats = this.calculateParlayStats(highConfPicks.slice(0, 4), oddsData);
- 
-        embed.addFields({
-            name: "🥊 PRELIMINARY CARD PARLAYS",
-            value: [
-                "TWO-FIGHT PRELIMS:",
-                ...highConfPicks.slice(0, 2).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(twoFightStats.confidenceProduct * 100).toFixed(1)}%`,
-                `└ Implied Probability: ${twoFightStats.impliedProbability}%`,
-                `└ Potential Return: ${twoFightStats.potentialReturn}`,
-                `└ Edge: ${twoFightStats.edge}%`,
-                `└ Rating: ${twoFightStats.rating}`,
-                "",
-                "THREE-FIGHT PRELIMS:",
-                ...highConfPicks.slice(0, 3).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(threeFightStats.confidenceProduct * 100).toFixed(1)}%`,
-                `└ Implied Probability: ${threeFightStats.impliedProbability}%`,
-                `└ Potential Return: ${threeFightStats.potentialReturn}`,
-                `└ Edge: ${threeFightStats.edge}%`,
-                `└ Rating: ${threeFightStats.rating}`,
-                "",
-                "FOUR-FIGHT PRELIMS:",
-                ...highConfPicks.slice(0, 4).map(pick => {
-                    const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                    return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                }),
-                `└ Combined Probability: ${(fourFightStats.confidenceProduct * 100).toFixed(1)}%`,
-                `└ Implied Probability: ${fourFightStats.impliedProbability}%`,
-                `└ Potential Return: ${fourFightStats.potentialReturn}`,
-                `└ Edge: ${fourFightStats.edge}%`,
-                `└ Rating: ${fourFightStats.rating}`
-            ].join('\n'),
-            inline: false
-        });
-    }
- }
+      .filter(fight => fight.confidence >= 70)
+      .sort((a, b) => b.confidence - a.confidence);
 
- static async addCrossCardParlays(embed, mainCardData, prelimData, oddsData) {
-  try {
+    if (highConfPicks.length >= 2) {
+      const twoFightStats = this.calculateParlayStats(highConfPicks.slice(0, 2), oddsData);
+      const threeFightStats = this.calculateParlayStats(highConfPicks.slice(0, 3), oddsData);
+      const fourFightStats = this.calculateParlayStats(highConfPicks.slice(0, 4), oddsData);
+
+      embed.addFields({
+        name: "🎯 MAIN CARD PARLAYS",
+        value: [
+          "TWO-FIGHT MAIN CARD:",
+          ...highConfPicks.slice(0, 2).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(twoFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${twoFightStats.impliedProbability}%`,
+          `└ Potential Return: ${twoFightStats.potentialReturn}`,
+          `└ Edge: ${twoFightStats.edge}%`,
+          `└ Rating: ${twoFightStats.rating}`,
+          "",
+          "THREE-FIGHT MAIN CARD:",
+          ...highConfPicks.slice(0, 3).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(threeFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${threeFightStats.impliedProbability}%`,
+          `└ Potential Return: ${threeFightStats.potentialReturn}`,
+          `└ Edge: ${threeFightStats.edge}%`,
+          `└ Rating: ${threeFightStats.rating}`,
+          "",
+          "FOUR-FIGHT MAIN CARD:",
+          ...highConfPicks.slice(0, 4).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(fourFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${fourFightStats.impliedProbability}%`,
+          `└ Potential Return: ${fourFightStats.potentialReturn}`,
+          `└ Edge: ${fourFightStats.edge}%`,
+          `└ Rating: ${fourFightStats.rating}`
+        ].join('\n'),
+        inline: false
+      });
+    }
+  }
+
+  static async addPrelimParlays(embed, prelimData, oddsData) {
+    const highConfPicks = prelimData
+      .filter(fight => fight.confidence >= 70)
+      .sort((a, b) => b.confidence - a.confidence);
+
+    if (highConfPicks.length >= 2) {
+      const twoFightStats = this.calculateParlayStats(highConfPicks.slice(0, 2), oddsData);
+      const threeFightStats = this.calculateParlayStats(highConfPicks.slice(0, 3), oddsData);
+      const fourFightStats = this.calculateParlayStats(highConfPicks.slice(0, 4), oddsData);
+
+      embed.addFields({
+        name: "🥊 PRELIMINARY CARD PARLAYS",
+        value: [
+          "TWO-FIGHT PRELIMS:",
+          ...highConfPicks.slice(0, 2).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(twoFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${twoFightStats.impliedProbability}%`,
+          `└ Potential Return: ${twoFightStats.potentialReturn}`,
+          `└ Edge: ${twoFightStats.edge}%`,
+          `└ Rating: ${twoFightStats.rating}`,
+          "",
+          "THREE-FIGHT PRELIMS:",
+          ...highConfPicks.slice(0, 3).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(threeFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${threeFightStats.impliedProbability}%`,
+          `└ Potential Return: ${threeFightStats.potentialReturn}`,
+          `└ Edge: ${threeFightStats.edge}%`,
+          `└ Rating: ${threeFightStats.rating}`,
+          "",
+          "FOUR-FIGHT PRELIMS:",
+          ...highConfPicks.slice(0, 4).map(pick => {
+            const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+            return `└ ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+          }),
+          `└ Combined Probability: ${(fourFightStats.confidenceProduct * 100).toFixed(1)}%`,
+          `└ Implied Probability: ${fourFightStats.impliedProbability}%`,
+          `└ Potential Return: ${fourFightStats.potentialReturn}`,
+          `└ Edge: ${fourFightStats.edge}%`,
+          `└ Rating: ${fourFightStats.rating}`
+        ].join('\n'),
+        inline: false
+      });
+    }
+  }
+
+  static async addCrossCardParlays(embed, mainCardData, prelimData, oddsData) {
+    try {
       const parlayConfigurations = [
-          {
-              name: "THREE-FIGHT CROSS-CARD",
-              risk: "MEDIUM RISK",
-              mainCount: 2,
-              prelimCount: 1,
-              minConfidence: 75
-          },
-          {
-              name: "FIVE-FIGHT CROSS-CARD",
-              risk: "HIGH RISK",
-              mainCount: 3,
-              prelimCount: 2,
-              minConfidence: 70
-          },
-          {
-              name: "SEVEN-FIGHT CROSS-CARD",
-              risk: "EXTREME RISK",
-              mainCount: 4,
-              prelimCount: 3,
-              minConfidence: 65
-          }
+        {
+          name: "THREE-FIGHT CROSS-CARD",
+          risk: "MEDIUM RISK",
+          mainCount: 2,
+          prelimCount: 1,
+          minConfidence: 75
+        },
+        {
+          name: "FIVE-FIGHT CROSS-CARD",
+          risk: "HIGH RISK",
+          mainCount: 3,
+          prelimCount: 2,
+          minConfidence: 70
+        },
+        {
+          name: "SEVEN-FIGHT CROSS-CARD",
+          risk: "EXTREME RISK",
+          mainCount: 4,
+          prelimCount: 3,
+          minConfidence: 65
+        }
       ];
 
       embed.addFields({
-          name: "🔄 CROSS-CARD PARLAYS",
-          value: "Premium cross-card parlays with our picks and analysis.\n━━━━━━━━━━━━━━━━━━━━━━",
-          inline: false
+        name: "🔄 CROSS-CARD PARLAYS",
+        value: "Premium cross-card parlays with our picks and analysis.\n━━━━━━━━━━━━━━━━━━━━━━",
+        inline: false
       });
 
       for (const config of parlayConfigurations) {
-          const mainPicks = mainCardData
-              .filter(f => f.confidence >= config.minConfidence)
-              .slice(0, config.mainCount);
-             
-          const prelimPicks = prelimData
-              .filter(f => f.confidence >= config.minConfidence)
-              .slice(0, config.prelimCount);
+        const mainPicks = mainCardData
+          .filter(f => f.confidence >= config.minConfidence)
+          .slice(0, config.mainCount);
 
-          if (mainPicks.length + prelimPicks.length >= (config.mainCount + config.prelimCount)) {
-              const parlay = [...mainPicks, ...prelimPicks];
-              const stats = this.calculateParlayStats(parlay, oddsData);
+        const prelimPicks = prelimData
+          .filter(f => f.confidence >= config.minConfidence)
+          .slice(0, config.prelimCount);
 
-              if (parseFloat(stats.edge) > 0 && parseFloat(stats.impliedProbability) < 100) {
-                  embed.addFields({
-                      name: `🎲 ${config.name} (${config.risk})`,
-                      value: [
-                          ...parlay.map(pick => {
-                              const cardEmoji = mainPicks.includes(pick) ? "🎯" : "🥊";
-                              const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
-                              return `└ ${cardEmoji} ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
-                          }),
-                          "",
-                          `└ True Parlay Probability: ${(stats.confidenceProduct * 100).toFixed(1)}%`,
-                          `└ Market Implied Probability: ${stats.impliedProbability}%`,
-                          `└ Potential Return: ${stats.potentialReturn}`,
-                          `└ Value Edge: ${stats.edge}%`,
-                          `└ Rating: ${this.getParlayRating(parseFloat(stats.edge), stats.confidenceProduct * 100)}`
-                      ].join('\n'),
-                      inline: false
-                  });
-              }
+        if (mainPicks.length + prelimPicks.length >= (config.mainCount + config.prelimCount)) {
+          const parlay = [...mainPicks, ...prelimPicks];
+          const stats = this.calculateParlayStats(parlay, oddsData);
+
+          if (parseFloat(stats.edge) > 0 && parseFloat(stats.impliedProbability) < 100) {
+            embed.addFields({
+              name: `🎲 ${config.name} (${config.risk})`,
+              value: [
+                ...parlay.map(pick => {
+                  const cardEmoji = mainPicks.includes(pick) ? "🎯" : "🥊";
+                  const confEmoji = pick.confidence >= 75 ? "🔒" : "✅";
+                  return `└ ${cardEmoji} ${confEmoji} ${pick.predictedWinner} (${pick.confidence}%)`;
+                }),
+                "",
+                `└ True Parlay Probability: ${(stats.confidenceProduct * 100).toFixed(1)}%`,
+                `└ Market Implied Probability: ${stats.impliedProbability}%`,
+                `└ Potential Return: ${stats.potentialReturn}`,
+                `└ Value Edge: ${stats.edge}%`,
+                `└ Rating: ${this.getParlayRating(parseFloat(stats.edge), stats.confidenceProduct * 100)}`
+              ].join('\n'),
+              inline: false
+            });
           }
+        }
       }
 
       await this.addMethodProps(embed, [...mainCardData, ...prelimData], oddsData);
 
-  } catch (error) {
+    } catch (error) {
       console.error('Error generating cross-card parlays:', error);
+    }
   }
-}
 
-static getParlayRating(edge, confidence) {
-  if (edge >= 20 && confidence >= 75) return "⭐⭐⭐⭐⭐";
-  if (edge >= 15 && confidence >= 70) return "⭐⭐⭐⭐";
-  if (edge >= 10 && confidence >= 65) return "⭐⭐⭐";
-  if (edge >= 5 && confidence >= 60) return "⭐⭐";
-  return "⭐";
-}
+  static getParlayRating(edge, confidence) {
+    if (edge >= 20 && confidence >= 75) return "⭐⭐⭐⭐⭐";
+    if (edge >= 15 && confidence >= 70) return "⭐⭐⭐⭐";
+    if (edge >= 10 && confidence >= 65) return "⭐⭐⭐";
+    if (edge >= 5 && confidence >= 60) return "⭐⭐";
+    return "⭐";
+  }
 
-// Add new method for prop bets
-static async addMethodProps(embed, fights, oddsData) {
-  try {
+  // Add new method for prop bets
+  static async addMethodProps(embed, fights, oddsData) {
+    try {
       const highConfidenceProps = fights
-          .filter(fight => {
-              const method = fight.probabilityBreakdown;
-              return (
-                  (method.ko_tko >= 60 && fight.confidence >= 70) ||
-                  (method.submission >= 50 && fight.confidence >= 70) ||
-                  (method.decision >= 75 && fight.confidence >= 75)
-              );
-          })
-          .map(fight => {
-              const method = fight.probabilityBreakdown;
-              const bestMethod = this.determineBestMethod(method);
-              return {
-                  fighter: fight.predictedWinner,
-                  method: bestMethod.method,
-                  probability: bestMethod.probability,
-                  confidence: fight.confidence
-              };
-          })
-          .sort((a, b) => b.probability - a.probability)
-          .slice(0, 3);  // Take top 3 props
+        .filter(fight => {
+          const method = fight.probabilityBreakdown;
+          return (
+            (method.ko_tko >= 60 && fight.confidence >= 70) ||
+            (method.submission >= 50 && fight.confidence >= 70) ||
+            (method.decision >= 75 && fight.confidence >= 75)
+          );
+        })
+        .map(fight => {
+          const method = fight.probabilityBreakdown;
+          const bestMethod = this.determineBestMethod(method);
+          return {
+            fighter: fight.predictedWinner,
+            method: bestMethod.method,
+            probability: bestMethod.probability,
+            confidence: fight.confidence
+          };
+        })
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, 3);  // Take top 3 props
 
       if (highConfidenceProps.length > 0) {
-          embed.addFields({
-              name: "🎯 HIGH CONFIDENCE PROPS",
-              value: highConfidenceProps.map(prop => {
-                  const methodEmoji = 
-                      prop.method === 'KO/TKO' ? '👊' :
-                      prop.method === 'Submission' ? '🔄' : '📋';
-                  return [
-                      `${methodEmoji} ${prop.fighter} to win by ${prop.method}`,
-                      `└ Confidence: ${prop.confidence}%`,
-                      `└ Method Probability: ${prop.probability.toFixed(1)}%`,
-                      ''
-                  ].join('\n');
-              }).join('\n'),
-              inline: false
-          });
+        embed.addFields({
+          name: "🎯 HIGH CONFIDENCE PROPS",
+          value: highConfidenceProps.map(prop => {
+            const methodEmoji =
+              prop.method === 'KO/TKO' ? '👊' :
+                prop.method === 'Submission' ? '🔄' : '📋';
+            return [
+              `${methodEmoji} ${prop.fighter} to win by ${prop.method}`,
+              `└ Confidence: ${prop.confidence}%`,
+              `└ Method Probability: ${prop.probability.toFixed(1)}%`,
+              ''
+            ].join('\n');
+          }).join('\n'),
+          inline: false
+        });
       }
-  } catch (error) {
+    } catch (error) {
       console.error('Error generating method props:', error);
+    }
   }
-}
 
-static determineBestMethod(methodBreakdown) {
-  const methods = [
+  static determineBestMethod(methodBreakdown) {
+    const methods = [
       { method: 'KO/TKO', probability: methodBreakdown.ko_tko, threshold: 60 },
       { method: 'Submission', probability: methodBreakdown.submission, threshold: 50 },
       { method: 'Decision', probability: methodBreakdown.decision, threshold: 75 }
-  ];
+    ];
 
-  return methods
+    return methods
       .filter(m => m.probability >= m.threshold)
-      .sort((a, b) => b.probability - a.probability)[0] || 
+      .sort((a, b) => b.probability - a.probability)[0] ||
       { method: 'Unknown', probability: 0 };
-}
+  }
 
- static calculateParlayStats(picks, oddsData) {
-  console.log("Calculating parlay stats for picks:", picks.map(p => p.predictedWinner));
-  try {
-    if (!picks?.length || !oddsData) {
+  static calculateParlayStats(picks, oddsData) {
+    console.log("Calculating parlay stats for picks:", picks.map(p => p.predictedWinner));
+    try {
+      if (!picks?.length || !oddsData) {
+        return {
+          confidenceProduct: 0,
+          impliedProbability: "0.0",
+          potentialReturn: "+0.00%",
+          edge: "0.0",
+          rating: "⭐"
+        };
+      }
+
+      const confidenceProduct = picks.reduce((product, pick) => {
+        return product * (pick.confidence / 100);
+      }, 1);
+
+      let impliedProbability = 1;
+      let potentialReturn = 1;
+
+      for (const pick of picks) {
+        try {
+          const fightOdds = OddsAnalysis.getFightOdds(
+            { fighter1: pick.fighter1, fighter2: pick.fighter2 },
+            oddsData,
+            "fanduel"
+          );
+
+          if (!fightOdds) {
+            impliedProbability *= 0.5;
+            potentialReturn *= 2;
+            continue;
+          }
+
+          const selectedOdds = pick.predictedWinner === pick.fighter1
+            ? fightOdds.fighter1.price
+            : fightOdds.fighter2.price;
+
+          const legProbability = OddsAnalysis.calculateImpliedProbability(selectedOdds) / 100;
+          impliedProbability *= legProbability;
+
+          if (selectedOdds > 0) {
+            potentialReturn *= (1 + selectedOdds / 100);
+          } else {
+            potentialReturn *= (1 + 100 / Math.abs(selectedOdds));
+          }
+        } catch (error) {
+          console.log(`Error processing odds for ${pick.predictedWinner}`);
+          impliedProbability *= 0.5;
+          potentialReturn *= 2;
+        }
+      }
+
+      const finalImpliedProbability = (impliedProbability * 100).toFixed(1);
+      const finalPotentialReturn = `+${((potentialReturn - 1) * 100).toFixed(2)}%`;
+      const edge = (confidenceProduct * 100 - parseFloat(finalImpliedProbability)).toFixed(1);
+      const rating = "⭐".repeat(this.calculateRating(parseFloat(edge), confidenceProduct * 100));
+
+      return {
+        confidenceProduct,
+        impliedProbability: finalImpliedProbability,
+        potentialReturn: finalPotentialReturn,
+        edge,
+        rating
+      };
+    } catch (error) {
+      console.error("Error calculating parlay stats:", error);
       return {
         confidenceProduct: 0,
         impliedProbability: "0.0",
@@ -1701,174 +1748,111 @@ static determineBestMethod(methodBreakdown) {
         rating: "⭐"
       };
     }
+  }
 
-    const confidenceProduct = picks.reduce((product, pick) => {
-      return product * (pick.confidence / 100);
-    }, 1);
+  static calculateRating(edge, confidence) {
+    // Enhanced rating system
+    if (edge >= 20 && confidence >= 75) return 5;
+    if (edge >= 15 && confidence >= 70) return 4;
+    if (edge >= 10 && confidence >= 65) return 3;
+    if (edge >= 5 && confidence >= 60) return 2;
+    return 1;
+  }
 
-    let impliedProbability = 1;
-    let potentialReturn = 1;
+  static getFightOdds(fight, oddsData) {
+    const fightOdds = OddsAnalysis.getFightOdds(
+      { fighter1: fight.fighter1, fighter2: fight.fighter2 },
+      oddsData,
+      "fanduel"
+    );
 
-    for (const pick of picks) {
-      try {
-        const fightOdds = OddsAnalysis.getFightOdds(
-          { fighter1: pick.fighter1, fighter2: pick.fighter2 },
-          oddsData,
-          "fanduel"
+    if (!fightOdds) return null;
+
+    return fight.predictedWinner === fight.fighter1
+      ? fightOdds.fighter1.price
+      : fightOdds.fighter2.price;
+  }
+
+  static calculateEdge(confidence, odds) {
+    const impliedProb = OddsAnalysis.calculateImpliedProbability(odds);
+    return (confidence - impliedProb).toFixed(1);
+  }
+
+  static async analyzeEventValue(mainCardData, prelimData, oddsData) {
+    try {
+      const allFights = [...mainCardData, ...prelimData];
+      const valueAnalysis = {
+        highValueFights: [],
+        mediumValueFights: [],
+        lowValueFights: [],
+        totalEdge: 0,
+        averageEdge: 0
+      };
+
+      // Analyze each fight for betting value
+      for (const fight of allFights) {
+        const odds = this.getFightOdds(fight, oddsData, 'fanduel');
+        if (!odds) continue;
+
+        const selectedOdds = fight.predictedWinner === fight.fighter1
+          ? odds.fighter1.price
+          : odds.fighter2.price;
+
+        const impliedProbability = this.calculateImpliedProbability(selectedOdds);
+        const edge = fight.confidence - impliedProbability;
+        const methodConfidence = Math.max(
+          fight.probabilityBreakdown.ko_tko,
+          fight.probabilityBreakdown.submission,
+          fight.probabilityBreakdown.decision
         );
 
-        if (!fightOdds) {
-          impliedProbability *= 0.5;
-          potentialReturn *= 2;
-          continue;
-        }
-
-        const selectedOdds = pick.predictedWinner === pick.fighter1 
-          ? fightOdds.fighter1.price 
-          : fightOdds.fighter2.price;
-
-        const legProbability = OddsAnalysis.calculateImpliedProbability(selectedOdds) / 100;
-        impliedProbability *= legProbability;
-
-        if (selectedOdds > 0) {
-          potentialReturn *= (1 + selectedOdds / 100);
-        } else {
-          potentialReturn *= (1 + 100 / Math.abs(selectedOdds));
-        }
-      } catch (error) {
-        console.log(`Error processing odds for ${pick.predictedWinner}`);
-        impliedProbability *= 0.5;
-        potentialReturn *= 2;
-      }
-    }
-
-    const finalImpliedProbability = (impliedProbability * 100).toFixed(1);
-    const finalPotentialReturn = `+${((potentialReturn - 1) * 100).toFixed(2)}%`;
-    const edge = (confidenceProduct * 100 - parseFloat(finalImpliedProbability)).toFixed(1);
-    const rating = "⭐".repeat(this.calculateRating(parseFloat(edge), confidenceProduct * 100));
-
-    return {
-      confidenceProduct,
-      impliedProbability: finalImpliedProbability,
-      potentialReturn: finalPotentialReturn,
-      edge,
-      rating
-    };
-  } catch (error) {
-    console.error("Error calculating parlay stats:", error);
-    return {
-      confidenceProduct: 0,
-      impliedProbability: "0.0",
-      potentialReturn: "+0.00%",
-      edge: "0.0",
-      rating: "⭐"
-    };
-  }
-}
-
-static calculateRating(edge, confidence) {
-  // Enhanced rating system
-  if (edge >= 20 && confidence >= 75) return 5;
-  if (edge >= 15 && confidence >= 70) return 4;
-  if (edge >= 10 && confidence >= 65) return 3;
-  if (edge >= 5 && confidence >= 60) return 2;
-  return 1;
-}
-
-static getFightOdds(fight, oddsData) {
-  const fightOdds = OddsAnalysis.getFightOdds(
-    { fighter1: fight.fighter1, fighter2: fight.fighter2 },
-    oddsData,
-    "fanduel"
-  );
-
-  if (!fightOdds) return null;
-
-  return fight.predictedWinner === fight.fighter1
-    ? fightOdds.fighter1.price
-    : fightOdds.fighter2.price;
-}
-
-static calculateEdge(confidence, odds) {
-  const impliedProb = OddsAnalysis.calculateImpliedProbability(odds);
-  return (confidence - impliedProb).toFixed(1);
-}
-
-static async analyzeEventValue(mainCardData, prelimData, oddsData) {
-    try {
-        const allFights = [...mainCardData, ...prelimData];
-        const valueAnalysis = {
-            highValueFights: [],
-            mediumValueFights: [],
-            lowValueFights: [],
-            totalEdge: 0,
-            averageEdge: 0
+        const fightValue = {
+          fighter: fight.predictedWinner,
+          confidence: fight.confidence,
+          edge: edge,
+          odds: selectedOdds,
+          methodConfidence,
+          isMainCard: mainCardData.includes(fight),
+          rating: this.calculateValueRating(edge, fight.confidence, methodConfidence)
         };
 
-        // Analyze each fight for betting value
-        for (const fight of allFights) {
-            const odds = this.getFightOdds(fight, oddsData, 'fanduel');
-            if (!odds) continue;
-
-            const selectedOdds = fight.predictedWinner === fight.fighter1 
-                ? odds.fighter1.price 
-                : odds.fighter2.price;
-
-            const impliedProbability = this.calculateImpliedProbability(selectedOdds);
-            const edge = fight.confidence - impliedProbability;
-            const methodConfidence = Math.max(
-                fight.probabilityBreakdown.ko_tko,
-                fight.probabilityBreakdown.submission,
-                fight.probabilityBreakdown.decision
-            );
-
-            const fightValue = {
-                fighter: fight.predictedWinner,
-                confidence: fight.confidence,
-                edge: edge,
-                odds: selectedOdds,
-                methodConfidence,
-                isMainCard: mainCardData.includes(fight),
-                rating: this.calculateValueRating(edge, fight.confidence, methodConfidence)
-            };
-
-            if (fightValue.rating >= 4) {
-                valueAnalysis.highValueFights.push(fightValue);
-            } else if (fightValue.rating >= 3) {
-                valueAnalysis.mediumValueFights.push(fightValue);
-            } else {
-                valueAnalysis.lowValueFights.push(fightValue);
-            }
-
-            valueAnalysis.totalEdge += edge;
+        if (fightValue.rating >= 4) {
+          valueAnalysis.highValueFights.push(fightValue);
+        } else if (fightValue.rating >= 3) {
+          valueAnalysis.mediumValueFights.push(fightValue);
+        } else {
+          valueAnalysis.lowValueFights.push(fightValue);
         }
 
-        valueAnalysis.averageEdge = valueAnalysis.totalEdge / allFights.length;
-        return valueAnalysis;
-    } catch (error) {
-        console.error('Error analyzing event value:', error);
-        return null;
-    }
-}
+        valueAnalysis.totalEdge += edge;
+      }
 
-static calculateValueRating(edge, confidence, methodConfidence) {
+      valueAnalysis.averageEdge = valueAnalysis.totalEdge / allFights.length;
+      return valueAnalysis;
+    } catch (error) {
+      console.error('Error analyzing event value:', error);
+      return null;
+    }
+  }
+
+  static calculateValueRating(edge, confidence, methodConfidence) {
     let rating = 0;
-    
+
     // Edge rating
     if (edge >= 20) rating += 2;
     else if (edge >= 10) rating += 1;
-    
+
     // Confidence rating
     if (confidence >= 75) rating += 2;
     else if (confidence >= 65) rating += 1;
-    
+
     // Method confidence rating
     if (methodConfidence >= 60) rating += 1;
-    
-    return rating;
-}
 
-static async addValueAnalysisToEmbed(embed, mainCardData, prelimData, oddsData) {
+    return rating;
+  }
+
+  static async addValueAnalysisToEmbed(embed, mainCardData, prelimData, oddsData) {
     const analysis = await this.analyzeEventValue(mainCardData, prelimData, oddsData);
     if (!analysis) return;
 
@@ -1881,93 +1865,93 @@ static async addValueAnalysisToEmbed(embed, mainCardData, prelimData, oddsData) 
     // Generate betting strategy recommendation
     let recommendation;
     if (sortedHighValue.length >= 3) {
-        recommendation = [
-            "🔥 STRONG BETTING OPPORTUNITY",
-            "Multiple high-value plays identified. Consider:",
-            "• Individual bets on top-rated fights",
-            "• Small parlay combinations with highest-rated picks",
-            "• Method props for high-confidence finishes"
-        ].join("\n");
+      recommendation = [
+        "🔥 STRONG BETTING OPPORTUNITY",
+        "Multiple high-value plays identified. Consider:",
+        "• Individual bets on top-rated fights",
+        "• Small parlay combinations with highest-rated picks",
+        "• Method props for high-confidence finishes"
+      ].join("\n");
     } else if (sortedHighValue.length > 0) {
-        recommendation = [
-            "✅ MODERATE BETTING OPPORTUNITY",
-            "Limited high-value plays available. Consider:",
-            "• Selective individual bets on highest-rated fights",
-            "• Conservative parlay approach"
-        ].join("\n");
+      recommendation = [
+        "✅ MODERATE BETTING OPPORTUNITY",
+        "Limited high-value plays available. Consider:",
+        "• Selective individual bets on highest-rated fights",
+        "• Conservative parlay approach"
+      ].join("\n");
     } else {
-        recommendation = [
-            "⚠️ LIMITED BETTING VALUE",
-            "Few high-value opportunities identified.",
-            "Recommend reduced exposure and highly selective betting"
-        ].join("\n");
+      recommendation = [
+        "⚠️ LIMITED BETTING VALUE",
+        "Few high-value opportunities identified.",
+        "Recommend reduced exposure and highly selective betting"
+      ].join("\n");
     }
 
     // Add value analysis section
     embed.addFields({
-        name: "💎 BETTING VALUE ANALYSIS",
-        value: [
-            `High-Value Fights Found: ${sortedHighValue.length}`,
-            `Medium-Value Fights Found: ${sortedMediumValue.length}`,
-            `Average Edge: ${averageEdge.toFixed(1)}%`,
-            "",
-            "TOP RATED OPPORTUNITIES:",
-            ...sortedHighValue.slice(0, 3).map(fight => 
-                `${fight.isMainCard ? "🎯" : "🥊"} ${fight.fighter} (${fight.rating}⭐) - Edge: ${fight.edge.toFixed(1)}%`
-            ),
-            "",
-            recommendation
-        ].join("\n"),
-        inline: false
+      name: "💎 BETTING VALUE ANALYSIS",
+      value: [
+        `High-Value Fights Found: ${sortedHighValue.length}`,
+        `Medium-Value Fights Found: ${sortedMediumValue.length}`,
+        `Average Edge: ${averageEdge.toFixed(1)}%`,
+        "",
+        "TOP RATED OPPORTUNITIES:",
+        ...sortedHighValue.slice(0, 3).map(fight =>
+          `${fight.isMainCard ? "🎯" : "🥊"} ${fight.fighter} (${fight.rating}⭐) - Edge: ${fight.edge.toFixed(1)}%`
+        ),
+        "",
+        recommendation
+      ].join("\n"),
+      inline: false
     });
 
     // Add optimal parlay combinations if high-value fights are available
     if (sortedHighValue.length >= 2) {
-        const optimalParlays = this.generateOptimalParlays(sortedHighValue, sortedMediumValue);
-        
-        embed.addFields({
-            name: "🌟 PREMIUM PARLAY COMBINATIONS",
-            value: optimalParlays.map(parlay => 
-                [
-                    `${parlay.rating}⭐ PARLAY:`,
-                    ...parlay.picks.map(pick => 
-                        `└ ${pick.isMainCard ? "🎯" : "🥊"} ${pick.fighter} (Edge: ${pick.edge.toFixed(1)}%)`
-                    ),
-                    `Combined Edge: ${parlay.combinedEdge.toFixed(1)}%`,
-                    ""
-                ].join("\n")
-            ).join("\n"),
-            inline: false
-        });
-    }
-}
+      const optimalParlays = this.generateOptimalParlays(sortedHighValue, sortedMediumValue);
 
-static generateOptimalParlays(highValueFights, mediumValueFights) {
+      embed.addFields({
+        name: "🌟 PREMIUM PARLAY COMBINATIONS",
+        value: optimalParlays.map(parlay =>
+          [
+            `${parlay.rating}⭐ PARLAY:`,
+            ...parlay.picks.map(pick =>
+              `└ ${pick.isMainCard ? "🎯" : "🥊"} ${pick.fighter} (Edge: ${pick.edge.toFixed(1)}%)`
+            ),
+            `Combined Edge: ${parlay.combinedEdge.toFixed(1)}%`,
+            ""
+          ].join("\n")
+        ).join("\n"),
+        inline: false
+      });
+    }
+  }
+
+  static generateOptimalParlays(highValueFights, mediumValueFights) {
     const parlays = [];
 
     // Generate 2-3 fight combinations from high-value fights
     if (highValueFights.length >= 2) {
-        const twoFightParlay = {
-            picks: highValueFights.slice(0, 2),
-            rating: 5,
-            combinedEdge: highValueFights.slice(0, 2).reduce((sum, fight) => sum + fight.edge, 0) / 2
-        };
-        parlays.push(twoFightParlay);
+      const twoFightParlay = {
+        picks: highValueFights.slice(0, 2),
+        rating: 5,
+        combinedEdge: highValueFights.slice(0, 2).reduce((sum, fight) => sum + fight.edge, 0) / 2
+      };
+      parlays.push(twoFightParlay);
     }
 
     // Add medium value fights for larger parlays if needed
     const allQualifiedFights = [...highValueFights, ...mediumValueFights.filter(f => f.edge > 10)];
     if (allQualifiedFights.length >= 3) {
-        const threeFightParlay = {
-            picks: allQualifiedFights.slice(0, 3),
-            rating: 4,
-            combinedEdge: allQualifiedFights.slice(0, 3).reduce((sum, fight) => sum + fight.edge, 0) / 3
-        };
-        parlays.push(threeFightParlay);
+      const threeFightParlay = {
+        picks: allQualifiedFights.slice(0, 3),
+        rating: 4,
+        combinedEdge: allQualifiedFights.slice(0, 3).reduce((sum, fight) => sum + fight.edge, 0) / 3
+      };
+      parlays.push(threeFightParlay);
     }
 
     return parlays;
-}
+  }
 
   static createBettingLegendEmbed() {
     return new EmbedBuilder()
@@ -2006,7 +1990,7 @@ static generateOptimalParlays(highValueFights, mediumValueFights) {
       })
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 5);
-  
+
     if (underdogPicks.length > 0) {
       embed.addFields({
         name: "🐶 UNDERDOG PICKS",
@@ -2047,214 +2031,214 @@ static generateOptimalParlays(highValueFights, mediumValueFights) {
 
   static async handleCalculationButton(interaction) {
     try {
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferUpdate();
-        }
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
 
-        // First Embed: Core Concepts
-        const basicConceptsEmbed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('🎯 Fight Genie Analysis System - Core Concepts')
-            .addFields(
-                {
-                    name: 'Understanding The Basics',
-                    value: [
-                        '```',
-                        'Fight Genie analyzes three key areas:',
-                        '',
-                        '1. Fighter Analysis',
-                        '   • Fighting style & techniques',
-                        '   • Recent performance (last 12 months)',
-                        '   • Physical advantages',
-                        '',
-                        '2. Statistical Edge',
-                        '   • True win probability',
-                        '   • Betting market odds',
-                        '   • Value opportunities',
-                        '',
-                        '3. Betting Value',
-                        '   • Profitable opportunities',
-                        '   • Risk assessment',
-                        '   • Parlay combinations',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                }
-            );
+      // First Embed: Core Concepts
+      const basicConceptsEmbed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('🎯 Fight Genie Analysis System - Core Concepts')
+        .addFields(
+          {
+            name: 'Understanding The Basics',
+            value: [
+              '```',
+              'Fight Genie analyzes three key areas:',
+              '',
+              '1. Fighter Analysis',
+              '   • Fighting style & techniques',
+              '   • Recent performance (last 12 months)',
+              '   • Physical advantages',
+              '',
+              '2. Statistical Edge',
+              '   • True win probability',
+              '   • Betting market odds',
+              '   • Value opportunities',
+              '',
+              '3. Betting Value',
+              '   • Profitable opportunities',
+              '   • Risk assessment',
+              '   • Parlay combinations',
+              '```'
+            ].join('\n'),
+            inline: false
+          }
+        );
 
-        // Second Embed: Edge Calculation Breakdown
-        const edgeCalculationEmbed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('🧮 Understanding Betting Edge')
-            .addFields(
-                {
-                    name: 'Converting Odds to Probability',
-                    value: [
-                        '```',
-                        'American Odds → Win Probability',
-                        '',
-                        'For Positive Odds (+150):',
-                        'Probability = 100 ÷ (Odds + 100)',
-                        'Example: +150 → 100/(150+100) = 40%',
-                        '',
-                        'For Negative Odds (-150):',
-                        'Probability = |Odds| ÷ (|Odds| + 100)',
-                        'Example: -150 → 150/(150+100) = 60%',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: 'Edge Calculation Example',
-                    value: [
-                        '```',
-                        'Example: Fighter A vs Fighter B',
-                        '',
-                        '1. Betting Odds: Fighter A +150 (40% implied)',
-                        '2. Our Model: Fighter A 50% to win',
-                        '3. Edge = Our % - Market %',
-                        '   Edge = 50% - 40% = +10% Edge',
-                        '',
-                        'This means we think Fighter A wins more',
-                        'often than the betting market suggests',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                }
-            );
+      // Second Embed: Edge Calculation Breakdown
+      const edgeCalculationEmbed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('🧮 Understanding Betting Edge')
+        .addFields(
+          {
+            name: 'Converting Odds to Probability',
+            value: [
+              '```',
+              'American Odds → Win Probability',
+              '',
+              'For Positive Odds (+150):',
+              'Probability = 100 ÷ (Odds + 100)',
+              'Example: +150 → 100/(150+100) = 40%',
+              '',
+              'For Negative Odds (-150):',
+              'Probability = |Odds| ÷ (|Odds| + 100)',
+              'Example: -150 → 150/(150+100) = 60%',
+              '```'
+            ].join('\n'),
+            inline: false
+          },
+          {
+            name: 'Edge Calculation Example',
+            value: [
+              '```',
+              'Example: Fighter A vs Fighter B',
+              '',
+              '1. Betting Odds: Fighter A +150 (40% implied)',
+              '2. Our Model: Fighter A 50% to win',
+              '3. Edge = Our % - Market %',
+              '   Edge = 50% - 40% = +10% Edge',
+              '',
+              'This means we think Fighter A wins more',
+              'often than the betting market suggests',
+              '```'
+            ].join('\n'),
+            inline: false
+          }
+        );
 
-        // Third Embed: Advanced Concepts
-        const advancedConceptsEmbed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('📊 Advanced Analysis System')
-            .addFields(
-                {
-                    name: 'Confidence Score Breakdown',
-                    value: [
-                        '```',
-                        'Model Confidence Formula:',
-                        '',
-                        'Base Score (30 points):',
-                        '• Win rate vs quality (15 pts)',
-                        '• UFC performance (15 pts)',
-                        '',
-                        'Style Points (25 points):',
-                        '• Technical matchup (15 pts)',
-                        '• Physical advantages (10 pts)',
-                        '',
-                        'Form Score (25 points):',
-                        '• Recent fights (15 pts)',
-                        '• Training camp (10 pts)',
-                        '',
-                        'Historical (20 points):',
-                        '• Career consistency (10 pts)',
-                        '• Big fight experience (10 pts)',
-                        '',
-                        'Total = Sum of all categories',
-                        'Example: 75/100 = 75% confidence',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: 'Value Rating System',
-                    value: [
-                        '```',
-                        'Star Rating = Edge + Confidence',
-                        '',
-                        '⭐⭐⭐⭐⭐',
-                        '• 20%+ edge AND 70%+ confidence',
-                        '• Example: We say 75%, market says 50%',
-                        '',
-                        '⭐⭐⭐⭐',
-                        '• 15%+ edge AND 65%+ confidence',
-                        '• Example: We say 70%, market says 52%',
-                        '',
-                        '⭐⭐⭐',
-                        '• 10%+ edge AND 60%+ confidence',
-                        '• Example: We say 65%, market says 53%',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                }
-            );
+      // Third Embed: Advanced Concepts
+      const advancedConceptsEmbed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('📊 Advanced Analysis System')
+        .addFields(
+          {
+            name: 'Confidence Score Breakdown',
+            value: [
+              '```',
+              'Model Confidence Formula:',
+              '',
+              'Base Score (30 points):',
+              '• Win rate vs quality (15 pts)',
+              '• UFC performance (15 pts)',
+              '',
+              'Style Points (25 points):',
+              '• Technical matchup (15 pts)',
+              '• Physical advantages (10 pts)',
+              '',
+              'Form Score (25 points):',
+              '• Recent fights (15 pts)',
+              '• Training camp (10 pts)',
+              '',
+              'Historical (20 points):',
+              '• Career consistency (10 pts)',
+              '• Big fight experience (10 pts)',
+              '',
+              'Total = Sum of all categories',
+              'Example: 75/100 = 75% confidence',
+              '```'
+            ].join('\n'),
+            inline: false
+          },
+          {
+            name: 'Value Rating System',
+            value: [
+              '```',
+              'Star Rating = Edge + Confidence',
+              '',
+              '⭐⭐⭐⭐⭐',
+              '• 20%+ edge AND 70%+ confidence',
+              '• Example: We say 75%, market says 50%',
+              '',
+              '⭐⭐⭐⭐',
+              '• 15%+ edge AND 65%+ confidence',
+              '• Example: We say 70%, market says 52%',
+              '',
+              '⭐⭐⭐',
+              '• 10%+ edge AND 60%+ confidence',
+              '• Example: We say 65%, market says 53%',
+              '```'
+            ].join('\n'),
+            inline: false
+          }
+        );
 
-        // Fourth Embed: Parlay Math
-        const parlayEmbed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('🎲 Parlay Calculation System')
-            .addFields(
-                {
-                    name: 'Understanding Parlay Math',
-                    value: [
-                        '```',
-                        'Parlay Probability Formula:',
-                        '',
-                        'Total Probability = Fight1 × Fight2',
-                        '',
-                        'Example Two-Fight Parlay:',
-                        'Fight 1: 70% chance = 0.70',
-                        'Fight 2: 65% chance = 0.65',
-                        'Combined: 0.70 × 0.65 = 0.455',
-                        'Final Probability = 45.5%',
-                        '',
-                        'This is why parlays are risky!',
-                        'Two good chances = lower overall odds',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: 'Smart Parlay Strategy',
-                    value: [
-                        '```',
-                        'Fight Genie Parlay Rules:',
-                        '',
-                        '1. High Confidence Picks Only',
-                        '   • Main picks: 70%+ confidence',
-                        '   • Value picks: 15%+ edge',
-                        '',
-                        '2. Maximum Three Fights',
-                        '   • Two fights = safer',
-                        '   • Three fights = higher risk/reward',
-                        '',
-                        '3. Style Consideration',
-                        '   • Don\'t parlay similar fighting styles',
-                        '   • Mix finishers with decision winners',
-                        '   • Avoid all underdogs in same parlay',
-                        '```'
-                    ].join('\n'),
-                    inline: false
-                }
-            );
+      // Fourth Embed: Parlay Math
+      const parlayEmbed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('🎲 Parlay Calculation System')
+        .addFields(
+          {
+            name: 'Understanding Parlay Math',
+            value: [
+              '```',
+              'Parlay Probability Formula:',
+              '',
+              'Total Probability = Fight1 × Fight2',
+              '',
+              'Example Two-Fight Parlay:',
+              'Fight 1: 70% chance = 0.70',
+              'Fight 2: 65% chance = 0.65',
+              'Combined: 0.70 × 0.65 = 0.455',
+              'Final Probability = 45.5%',
+              '',
+              'This is why parlays are risky!',
+              'Two good chances = lower overall odds',
+              '```'
+            ].join('\n'),
+            inline: false
+          },
+          {
+            name: 'Smart Parlay Strategy',
+            value: [
+              '```',
+              'Fight Genie Parlay Rules:',
+              '',
+              '1. High Confidence Picks Only',
+              '   • Main picks: 70%+ confidence',
+              '   • Value picks: 15%+ edge',
+              '',
+              '2. Maximum Three Fights',
+              '   • Two fights = safer',
+              '   • Three fights = higher risk/reward',
+              '',
+              '3. Style Consideration',
+              '   • Don\'t parlay similar fighting styles',
+              '   • Mix finishers with decision winners',
+              '   • Avoid all underdogs in same parlay',
+              '```'
+            ].join('\n'),
+            inline: false
+          }
+        );
 
-        const navigationRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('betting_analysis')
-                    .setLabel('View Current Betting Analysis')
-                    .setEmoji('💰')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('show_event')
-                    .setLabel('Back to Event')
-                    .setEmoji('↩️')
-                    .setStyle(ButtonStyle.Secondary)
-            );
+      const navigationRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('betting_analysis')
+            .setLabel('View Current Betting Analysis')
+            .setEmoji('💰')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId('show_event')
+            .setLabel('Back to Event')
+            .setEmoji('↩️')
+            .setStyle(ButtonStyle.Secondary)
+        );
 
-        await interaction.editReply({
-            embeds: [basicConceptsEmbed, edgeCalculationEmbed, advancedConceptsEmbed, parlayEmbed],
-            components: [navigationRow]
-        });
+      await interaction.editReply({
+        embeds: [basicConceptsEmbed, edgeCalculationEmbed, advancedConceptsEmbed, parlayEmbed],
+        components: [navigationRow]
+      });
 
     } catch (error) {
-        console.error('Error displaying calculation system:', error);
-        await interaction.editReply({
-            content: 'Error displaying prediction system information. Please try again.',
-            ephemeral: true
-        });
+      console.error('Error displaying calculation system:', error);
+      await interaction.editReply({
+        content: 'Error displaying prediction system information. Please try again.',
+        ephemeral: true
+      });
     }
-}
+  }
 }
 
 module.exports = EventHandlers;

@@ -16,7 +16,7 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true,
 });
 
-async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "claude") {
+async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "Claude-3.5") {
   try {
       console.log("Starting prediction generation with model:", model);
       console.log("Number of fights to analyze:", fightData.length);
@@ -716,7 +716,7 @@ async function generatePredictionsWithGPT(prompt) {
           console.log(`Processing batch ${i / maxFightsPerRequest + 1} of ${Math.ceil(enrichedFights.length / maxFightsPerRequest)}`);
 
           const gptResponse = await openai.chat.completions.create({
-              model: "gpt-4-turbo-preview",
+              model: "GPT-4o-turbo-preview",
               messages: [
                   {
                       role: "system",
@@ -794,8 +794,8 @@ async function generatePredictionsWithGPT(prompt) {
 
 async function generatePredictionsWithClaude(prompt) {
   try {
-      const claudeResponse = await anthropic.messages.create({
-          model: "claude-3-opus-20240229",
+      const ClaudeResponse = await anthropic.messages.create({
+          model: "Claude-3.5-3-opus-20240229",
           max_tokens: 4000,
           temperature: 0.7,
           top_p: 0.9,
@@ -812,22 +812,22 @@ async function generatePredictionsWithClaude(prompt) {
           ]
       });
 
-      if (!claudeResponse.content || !Array.isArray(claudeResponse.content) || claudeResponse.content.length === 0) {
-          console.error("Invalid response structure from Claude:", claudeResponse);
-          throw new Error("Invalid response structure from Claude");
+      if (!ClaudeResponse.content || !Array.isArray(ClaudeResponse.content) || ClaudeResponse.content.length === 0) {
+          console.error("Invalid response structure from Claude-3.5:", ClaudeResponse);
+          throw new Error("Invalid response structure from Claude-3.5");
       }
 
-      const textContent = claudeResponse.content.find(item => item.type === "text");
+      const textContent = ClaudeResponse.content.find(item => item.type === "text");
       if (!textContent || !textContent.text) {
-          console.error("No text content found in Claude response:", claudeResponse);
-          throw new Error("No text content found in Claude response");
+          console.error("No text content found in Claude-3.5 response:", ClaudeResponse);
+          throw new Error("No text content found in Claude-3.5 response");
       }
 
       // Extract JSON from response
       const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-          console.error("No JSON found in Claude response:", textContent.text);
-          throw new Error("No JSON found in Claude response");
+          console.error("No JSON found in Claude-3.5 response:", textContent.text);
+          throw new Error("No JSON found in Claude-3.5 response");
       }
 
       // Clean and parse the JSON
@@ -859,7 +859,7 @@ async function generatePredictionsWithClaude(prompt) {
       }
 
   } catch (error) {
-      console.error("Error with Claude prediction:", error);
+      console.error("Error with Claude-3.5 prediction:", error);
 
       // Handle rate limits or token limits with fallback
       if (error.message.includes("token limit") || 
@@ -881,7 +881,7 @@ async function generatePredictionsWithClaude(prompt) {
           return generateSimplifiedPrediction();
       }
 
-      throw new Error("Failed to generate Claude prediction: " + error.message);
+      throw new Error("Failed to generate Claude-3.5 prediction: " + error.message);
   }
 }
 
