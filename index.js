@@ -185,7 +185,6 @@ client.on("messageCreate", async (message) => {
 
   const freeCommands = ["help", "buy"];
 
-  // In your index.js or where you handle commands:
   if (command === 'testpost') {
     if (!message.member?.permissions.has("Administrator")) {
       await message.reply("❌ This command requires administrator permissions.");
@@ -1028,30 +1027,30 @@ client.once("ready", () => {
 async function startup() {
   try {
     console.log("Initializing database...");
-
     await database.initializeDatabase();
-
     await database.createPaymentTables();
-
     console.log("Database initialized");
 
     console.log("Starting bot...");
-
     await client.login(process.env.DISCORD_TOKEN);
-
+    
     // Wait for the 'ready' event
-
     await new Promise((resolve) => client.once("ready", resolve));
-
     console.log("Bot startup complete");
+
+    // Initialize and schedule tweet automation
+    console.log("Initializing tweet automation...");
+    const tweetBot = new TweetAutomation();
+    await tweetBot.scheduleTweets();
+    console.log("Tweet automation initialized");
+
   } catch (error) {
     console.error("Startup error:", error);
-
     process.exit(1);
   }
 
-  // Schedule subscription cleanup every 10 minutes
-  const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes in milliseconds
+  // Schedule subscription cleanup 5 times per day (every 4.8 hours = 17,280,000 milliseconds)
+  const CLEANUP_INTERVAL = 4.8 * 60 * 60 * 1000; // 4.8 hours in milliseconds
 
   // Initial cleanup on startup
   setTimeout(async () => {
@@ -1061,10 +1060,16 @@ async function startup() {
 
   // Set up recurring cleanup
   setInterval(async () => {
-    console.log('Running scheduled subscription cleanup...');
+    const now = new Date();
+    console.log(`Running scheduled subscription cleanup... [${now.toLocaleString()}]`);
     await database.cleanupExpiredSubscriptions();
   }, CLEANUP_INTERVAL);
+
+  // Log next scheduled cleanup time
+  const nextCleanup = new Date(Date.now() + CLEANUP_INTERVAL);
+  console.log(`Next scheduled cleanup at: ${nextCleanup.toLocaleString()}`);
 }
+
 startup();
 
 module.exports = { client };
