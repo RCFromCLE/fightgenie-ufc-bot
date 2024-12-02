@@ -123,12 +123,9 @@ class ModelStatsCommand {
     
             const embed = new EmbedBuilder()
                 .setColor("#0099ff")
-                .setTitle("🎯 GPT-4o vs. Claude-3.5")
+                .setTitle("👑 GPT-4o vs. Claude-3.5")
                 .setDescription([
-                    
-                    "Based on completed fight events analyzed by Fight Genie.",
-                    "",
-                    "Some fights may not have been analyzed due to a last-minute cancellation or other factors.",
+                    "Who will be crowned the UFC fight prediction champ?",
                     "━━━━━━━━━━━━━━━━━━━━━━━"
                 ].join("\n"))
                 .setThumbnail("attachment://FightGenie_Logo_1.PNG");
@@ -200,23 +197,24 @@ class ModelStatsCommand {
                 name: " ",
                 value: [
                     "🎯 **Win Rate**: How often each model's fight predictions are correct",
+                    "",
                     "🔒 **Lock Rate**: Performance on highest confidence picks (70%+), referred to as *locks*",
+                    "",
                     "🎨 **Method Accuracy**: Correct fight ending predictions",
                     "",
                     "⚖️ **Understanding Confidence Ratings**:",
-                    "",
                     "• AI analyzes fighter stats, styles, and matchup data",
                     "• Confidence shows how sure the model is about its pick",
                     "• 90% = Very strong pick with high certainty",
                     "• 60% = More competitive matchup with less certainty",
                     "",
                     "🔒 **Lock Picks (70%+ Confidence)**:",
-                    "",
                     "• These are fights where the AI sees clear paths to victory",
                     "• Based on strong stylistic or statistical advantages",
                     "• Our most thoroughly analyzed predictions",
+                    "",
+                    "*Based on completed fight events analyzed by Fight Genie. Some fights may not have been analyzed due to a last-minute cancellation or other factors.*",
                     ""
-                
                 ].join("\n"),
                 inline: false
             });

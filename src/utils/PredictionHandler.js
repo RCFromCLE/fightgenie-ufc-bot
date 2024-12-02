@@ -463,7 +463,7 @@ class PredictionHandler {
         return;
       }
 
-      const modelName = model === "gpt" ? "GPT-4oo" : "Claude-3.5-3.5";
+      const modelName = model === "gpt" ? "GPT-4o" : "Claude-3.5";
       const modelEmoji = model === "gpt" ? "🧠" : "🤖";
 
       // Get predictions from database
