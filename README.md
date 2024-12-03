@@ -158,9 +158,28 @@ Price Determination:
 #### Stripe (Apple Pay) Integration Integration
 ```javascript
 1. Creates secure checkout sessions with:
+- Apple Pay and card payment options
+- 30 minute timeout
+- Success/cancel URL handling
+- Event/lifetime access tiers
+
 2. Validates and processes webhooks:
+- Signature verification
+- Success/failure event handling
+- Database status updates
+- Subscription activation
+
 3. Verifies payments via:
+- Session lookup
+- Payment status checks
+- Record updates
+- User notifications
+
 4. Manages payment records in database:
+- Payment IDs
+- Server links
+- Status tracking
+- Audit history
 ```
 
 
