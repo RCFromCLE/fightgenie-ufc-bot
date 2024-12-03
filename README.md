@@ -155,6 +155,15 @@ Price Determination:
 4. Real-time conversion updates
 ```
 
+#### Stripe (Apple Pay) Integration Integration
+```javascript
+1. Creates secure checkout sessions with:
+2. Validates and processes webhooks:
+3. Verifies payments via:
+4. Manages payment records in database:
+```
+
+
 #### PayPal Processing
 ```javascript
 Payment Flow:
@@ -272,9 +281,3 @@ For technical support or inquiries:
 
 ### Testing
 [Testing procedures]
-
-Would you like me to:
-1. Add more technical details to any section?
-2. Include specific code examples?
-3. Expand on any component?
-4. Add deployment instructions?
