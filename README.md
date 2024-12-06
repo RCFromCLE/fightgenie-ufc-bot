@@ -4,6 +4,10 @@
 ![Discord](https://img.shields.io/badge/discord-bot-7289da)
 ![Platform](https://img.shields.io/badge/platform-Discord-7289da)
 
+https://fightgenie.ai/
+
+https://rudycorradetti.com/2024/12/04/fight-genie-ai-nodejs-discord-bot-ufc-predictions/
+
 Fight Genie is an advanced UFC fight prediction system utilizing dual AI models (GPT-4o and Claude-3.5 3.5 Sonnet), real-time odds integration, and comprehensive statistical analysis to provide accurate fight predictions and betting insights.
 
 ## Table of Contents
