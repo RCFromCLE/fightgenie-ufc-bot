@@ -216,7 +216,7 @@ class TweetAutomation {
             const event = await database.query(`
                 SELECT *
                 FROM events
-                WHERE Date >= date('now', '+1 day')
+                WHERE Date >= date('now')
                 AND Event IS NOT NULL
                 ORDER BY Date ASC
                 LIMIT 1
@@ -1754,7 +1754,7 @@ async scheduleTweets() {
     });
 
     // Saturday Updates - Starting at 3:00 PM
-    schedule.scheduleJob('saturday-update', '26 23 * * 1', async () => {
+    schedule.scheduleJob('saturday-update', '00 14 * * 6', async () => {
         try {
             if (!(await this.checkTweetSent('saturday_update'))) {
                 console.log('Executing Saturday comprehensive update');

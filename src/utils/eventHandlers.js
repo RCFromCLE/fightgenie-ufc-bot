@@ -15,6 +15,7 @@ const PredictionHandler = require("./PredictionHandler");
 const OddsAnalysis = require("./OddsAnalysis");
 const CheckStatsCommand = require("../commands/CheckStatsCommand");
 const MarketAnalysis = require('../utils/MarketAnalysis');
+const EventImageHandler = require('./EventImageHandler');
 
 class EventHandlers {
   static async getUpcomingEvent() {
@@ -92,142 +93,6 @@ class EventHandlers {
     return [...mainCard, ...prelims];
   }
 
-  static async createEventEmbed(event, showPrelims = false) {
-    try {
-      let fights = await database.getEventFights(event.Event);
-      if (!fights || !Array.isArray(fights)) {
-        throw new Error("No fights data available");
-      }
-
-      fights = await this.cleanupFightCard(fights);
-
-      const currentModel = ModelCommand.getCurrentModel() || "gpt";
-      const modelName =
-        currentModel.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5";
-
-      // Split fights into main card and prelims
-      const mainCard = fights.filter((f) => f.is_main_card === 1);
-      const prelims = fights.filter((f) => f.is_main_card === 0);
-
-      // Get event time from database
-      const eventDetails = await database.query(
-        `
-            SELECT Date, event_time 
-            FROM events 
-            WHERE Event = ? 
-            LIMIT 1`,
-        [event.Event]
-      );
-
-      const eventTime = eventDetails[0]?.event_time || "TBD";
-      const eventDate = new Date(new Date(eventDetails[0]?.Date).getTime() + (24 * 60 * 60 * 1000));
-
-      const embed = new EmbedBuilder()
-        .setColor("#0099ff")
-        .setTitle(`🥊 ${event.Event}`)
-        .setDescription(
-          [
-            `📅 ${eventDate.toLocaleDateString("en-US", {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })} at ${eventTime}`,
-            `📍 ${event.City}, ${event.Country}`,
-            "",
-            "💡 Records shown are UFC fights only",
-            "📊 Data from: ufcstats.com",
-            "",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            "",
-            "🎯 **MAIN CARD**",
-          ].join("\n")
-        )
-        .setThumbnail("attachment://FightGenie_Logo_1.PNG")
-        .setFooter({
-          text: `Fight Genie 1.0  |  Current Model: ${modelName}`,
-          iconURL: "attachment://FightGenie_Logo_1.PNG",
-        });
-
-      // Add main card fights
-      for (const fight of mainCard) {
-        const [fighter1Stats, fighter2Stats, fighter1Record, fighter2Record] =
-          await Promise.all([
-            FighterStats.getFighterStats(fight.fighter1),
-            FighterStats.getFighterStats(fight.fighter2),
-            this.getRecord(fight.fighter1),
-            this.getRecord(fight.fighter2),
-          ]);
-
-        embed.addFields({
-          name: fight.WeightClass || "Weight Class TBD",
-          value: [
-            `👊 **${fight.fighter1}** (${fighter1Record})`,
-            `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
-            }" reach`,
-            "⚔️",
-            `**${fight.fighter2}** (${fighter2Record})`,
-            `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
-            }" reach`,
-          ].join("\n"),
-          inline: false,
-        });
-      }
-
-      // Add prelims if showPrelims is true
-      if (showPrelims && prelims.length > 0) {
-        embed.addFields({
-          name: "\n━━━━━━━━━━━━━━━━━━━━━━\n🥊 **PRELIMINARY CARD**",
-          value: "\u200b",
-          inline: false,
-        });
-
-        for (const fight of prelims) {
-          const [fighter1Stats, fighter2Stats, fighter1Record, fighter2Record] =
-            await Promise.all([
-              FighterStats.getFighterStats(fight.fighter1),
-              FighterStats.getFighterStats(fight.fighter2),
-              this.getRecord(fight.fighter1),
-              this.getRecord(fight.fighter2),
-            ]);
-
-          embed.addFields({
-            name: fight.WeightClass || "Weight Class TBD",
-            value: [
-              `👊 **${fight.fighter1}** (${fighter1Record})`,
-              `${fighter1Stats?.Stance || "Orthodox"} | ${fighter1Stats?.Reach || "??"
-              }" reach`,
-              "⚔️",
-              `**${fight.fighter2}** (${fighter2Record})`,
-              `${fighter2Stats?.Stance || "Orthodox"} | ${fighter2Stats?.Reach || "??"
-              }" reach`,
-            ].join("\n"),
-            inline: false,
-          });
-        }
-      }
-
-      // Create navigation components
-      const components = await this.createNavigationButtons(
-        event,
-        showPrelims,
-        fights
-      );
-
-      return {
-        files: [
-          {
-            attachment: "./src/images/FightGenie_Logo_1.PNG",
-            name: "FightGenie_Logo_1.PNG",
-          },
-        ],
-        embeds: [embed],
-        components,
-      };
-    } catch (error) {
-      console.error("Error creating event embed:", error);
-      throw error;
-    }
-  }
 
   static async getRecord(fighterName) {
     try {
@@ -518,11 +383,9 @@ class EventHandlers {
       const modelName =
         currentModel.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5 Sonnet";
 
-      // Split fights into main card and prelims
       const mainCard = fights.filter((f) => f.is_main_card === 1);
       const prelims = fights.filter((f) => f.is_main_card === 0);
 
-      // Get event time from database
       const eventDetails = await database.query(
         `
             SELECT Date, event_time 
@@ -535,29 +398,41 @@ class EventHandlers {
       const eventTime = eventDetails[0]?.event_time || "3 PM PST";
       const eventDate = new Date(new Date(eventDetails[0]?.Date).getTime() + (24 * 60 * 60 * 1000));
 
-      // Create base embed
+      const { embed: tempEmbed, files } = await EventImageHandler.modifyEventEmbed(
+        new EmbedBuilder(),
+        event
+      );
+
+      const imageAttachment = files.find(file => file.name !== 'FightGenie_Logo_1.PNG');
+      const imageAttachmentName = imageAttachment ? imageAttachment.name : 'FightGenie_Logo_1.PNG';
+
+
       const embed = new EmbedBuilder()
         .setColor("#0099ff")
         .setTitle(
-          `🥊 UFC 310: ${mainCard[0]?.fighter1 || ""} vs. ${mainCard[0]?.fighter2 || ""
-          }`
+          `🥊 UFC 310: ${mainCard[0]?.fighter1 || ""} vs. ${mainCard[0]?.fighter2 || ""}`
         )
-        .setDescription(
-          [
-            `📅 ${eventDate.toLocaleString("en-US", {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })} at ${eventTime}`,
-            `📍 ${event.City}, ${event.Country}`,
-            "",
-            "💡 Records shown are UFC fights only",
-            "📊 Data from: ufcstats.com",
-            "",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            "",
-            "🎯 **MAIN CARD**",
-          ].join("\n")
+        .addFields(
+          {
+            name: "\u200b",
+            description: tempEmbed.setImage(`attachment://${imageAttachmentName}`).data.description,
+            value: [
+              `📅 ${eventDate.toLocaleString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              })} at ${eventTime}`,
+              `📍 ${event.City}, ${event.Country}`,
+              "",
+              "💡 Records shown are UFC fights only",
+              "📊 Data from: ufcstats.com",
+              "",
+              "━━━━━━━━━━━━━━━━━━━━━━",
+              "",
+              "🎯 **MAIN CARD**",
+            ].join("\n"),
+            inline: false
+          }
         )
         .setThumbnail("attachment://FightGenie_Logo_1.PNG")
         .setFooter({
@@ -565,7 +440,6 @@ class EventHandlers {
           iconURL: "attachment://FightGenie_Logo_1.PNG",
         });
 
-      // Add main card fights without odds
       for (const fight of mainCard) {
         const [fighter1Stats, fighter2Stats, fighter1Record, fighter2Record] =
           await Promise.all([
@@ -590,7 +464,6 @@ class EventHandlers {
         });
       }
 
-      // Add prelims if showPrelims is true
       if (showPrelims && prelims.length > 0) {
         embed.addFields({
           name: "\n━━━━━━━━━━━━━━━━━━━━━━\n🥊 **PRELIMINARY CARD**\n",
@@ -624,7 +497,6 @@ class EventHandlers {
         }
       }
 
-      // Create navigation components
       const components = await this.createNavigationButtons(
         event,
         showPrelims,
@@ -632,13 +504,8 @@ class EventHandlers {
       );
 
       return {
-        files: [
-          {
-            attachment: "./src/images/FightGenie_Logo_1.PNG",
-            name: "FightGenie_Logo_1.PNG",
-          },
-        ],
         embeds: [embed],
+        files,
         components,
       };
     } catch (error) {
