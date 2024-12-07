@@ -115,7 +115,7 @@ class PromoCommand {
             // Set expiration to 1:30 AM EST the day after the event
             const eventDate = new Date(event.Date);
             const expirationDate = new Date(eventDate);
-            expirationDate.setDate(eventDate.getDate() + 1);
+            expirationDate.setDate(eventDate.getDate() + 2);
             expirationDate.setHours(1, 30, 0, 0);
 
             // Create subscription
