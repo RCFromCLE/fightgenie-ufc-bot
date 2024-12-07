@@ -4,6 +4,10 @@
 ![Discord](https://img.shields.io/badge/discord-bot-7289da)
 ![Platform](https://img.shields.io/badge/platform-Discord-7289da)
 
+https://fightgenie.ai/
+
+https://rudycorradetti.com/2024/12/04/fight-genie-ai-nodejs-discord-bot-ufc-predictions/
+
 Fight Genie is an advanced UFC fight prediction system utilizing dual AI models (GPT-4o and Claude-3.5 3.5 Sonnet), real-time odds integration, and comprehensive statistical analysis to provide accurate fight predictions and betting insights.
 
 ## Table of Contents
@@ -155,6 +159,34 @@ Price Determination:
 4. Real-time conversion updates
 ```
 
+#### Stripe (Apple Pay) Integration Integration
+```javascript
+1. Creates secure checkout sessions with:
+- Apple Pay and card payment options
+- 30 minute timeout
+- Success/cancel URL handling
+- Event/lifetime access tiers
+
+2. Validates and processes webhooks:
+- Signature verification
+- Success/failure event handling
+- Database status updates
+- Subscription activation
+
+3. Verifies payments via:
+- Session lookup
+- Payment status checks
+- Record updates
+- User notifications
+
+4. Manages payment records in database:
+- Payment IDs
+- Server links
+- Status tracking
+- Audit history
+```
+
+
 #### PayPal Processing
 ```javascript
 Payment Flow:
@@ -272,9 +304,3 @@ For technical support or inquiries:
 
 ### Testing
 [Testing procedures]
-
-Would you like me to:
-1. Add more technical details to any section?
-2. Include specific code examples?
-3. Expand on any component?
-4. Add deployment instructions?
