@@ -59,7 +59,6 @@ class PromoCommand {
 
     static async validatePromoCode(code, serverId) {
         try {
-            // Get the promo code and its associated event
             const promoData = await database.query(`
                 SELECT p.*, e.Event, e.Date
                 FROM promo_codes p
@@ -70,26 +69,26 @@ class PromoCommand {
                 AND e.Date = (
                     SELECT MIN(Date)
                     FROM events
-                    WHERE Date > date('now')
+                    WHERE Date >= datetime('now', 'localtime')
                 )
             `, [code]);
-
+    
             if (!promoData?.[0]) {
+                console.error(`Promo code validation failed: code=${code}, serverId=${serverId}`);
                 return { valid: false, reason: '❌ Invalid or expired promo code.' };
             }
-
-            // Check if server already has access to this event
+    
             const existingAccess = await database.query(`
                 SELECT * FROM server_subscriptions
                 WHERE server_id = ?
                 AND event_id = ?
                 AND status = 'ACTIVE'
             `, [serverId, promoData[0].event_id]);
-
+    
             if (existingAccess?.length > 0) {
                 return { valid: false, reason: '❌ This server already has access to this event.' };
             }
-
+    
             return { 
                 valid: true, 
                 event: promoData[0]
@@ -100,6 +99,7 @@ class PromoCommand {
         }
     }
 
+    
     static async redeemPromoCode(code, serverId, event) {
         try {
             // Start transaction

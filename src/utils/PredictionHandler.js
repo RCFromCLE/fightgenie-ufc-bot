@@ -6,38 +6,84 @@ const {
 } = require("discord.js");
 const database = require("../database");
 const ModelCommand = require("../commands/ModelCommand");
-const { generateEnhancedPredictionsWith } = require("./llmhelper");
+const { generateEnhancedPredictionsWithAI } = require("./llmhelper");
 const FighterStats = require("./fighterStats");
 const OddsAnalysis = require("./OddsAnalysis");
 const MarketAnalysis = require('../utils/MarketAnalysis');
+const { processEventFights, processFightData } = require('./fightDataProcessor');
 
 class PredictionHandler {
-  static async getUpcomingEvent() {
+
+  static async getCurrentEvent() {
     try {
-      // First try to get current event
-      let event = await database.getCurrentEvent();
-
-      // If no current event, get next upcoming
-      if (!event) {
-        event = await database.getUpcomingEvent();
-      }
-
-      if (!event) {
-        throw new Error("No current or upcoming events found.");
-      }
-
-      // Get fights for the event
-      const fights = await database.getEventFights(event.Event);
-      if (!fights || fights.length === 0) {
-        console.log("No fights found for event:", event.Event);
-      }
-
-      return event;
+        // Use a window of time that includes the current day and previous day for late events
+        const query = `
+            SELECT DISTINCT 
+                event_id, Date, Event, City, State, 
+                Country, event_link, event_time
+            FROM events 
+            WHERE Date IN (date('now', '-1 day'), date('now'))
+            AND Event LIKE 'UFC%'
+            ORDER BY Date DESC
+            LIMIT 1
+        `;
+ 
+        const result = await database.query(query, []);
+        
+        if (result?.length > 0) {
+            console.log(`Found current event: ${result[0].Event}`);
+            return result[0];
+        }
+        
+        console.log("No current event found");
+        return null;
     } catch (error) {
-      console.error("Error in getUpcomingEvent:", error.message);
-      throw error;
+        console.error("Error in getCurrentEvent:", error);
+        throw error;
     }
-  }
+ }
+     
+    static async getUpcomingEvent() {
+      try {
+          // First try to get current event
+          let event = await this.getCurrentEvent();
+          
+          // If no current event, get next upcoming
+          if (!event) {
+              const query = `
+                  SELECT DISTINCT 
+                      event_id, Date, Event, City, State, 
+                      Country, event_link, event_time
+                  FROM events 
+                  WHERE Date >= date('now')
+                  AND Event LIKE 'UFC%'
+                  ORDER BY Date ASC 
+                  LIMIT 1
+              `;
+   
+              const result = await database.query(query, []);
+              if (result?.length > 0) {
+                  event = result[0];
+              }
+          }
+   
+          if (!event) {
+              throw new Error("No current or upcoming events found.");
+          }
+   
+          // Get fights for the event
+          const fights = await database.getEventFights(event.Event);
+          if (!fights || fights.length === 0) {
+              console.log("No fights found for event:", event.Event);
+          }
+   
+          return event;
+      } catch (error) {
+          console.error("Error in getUpcomingEvent:", error);
+          throw error;
+      }
+   }
+
   async isEventCompleted(eventLink) {
     try {
       if (!eventLink) return false;
@@ -58,61 +104,6 @@ class PredictionHandler {
     } catch (error) {
       console.error('Error checking event completion:', error);
       return false;
-    }
-  }
-
-  async getCurrentEvent() {
-    try {
-      // Get current date in EST
-      const estOptions = { timeZone: 'America/New_York' };
-      const currentDateEST = new Date().toLocaleString('en-US', estOptions);
-      const queryDate = new Date(currentDateEST).toISOString().slice(0, 10);
-
-      console.log(`Looking for current event on ${queryDate} (EST)`);
-
-      // First try to get today's event
-      const todayEvent = await this.query(`
-            SELECT DISTINCT 
-                event_id, Date, Event, City, State, 
-                Country, event_link, event_time
-            FROM events 
-            WHERE Date = ?
-            LIMIT 1
-        `, [queryDate]);
-
-      if (todayEvent && todayEvent.length > 0) {
-        const event = todayEvent[0];
-        // If today's event exists, check if it's completed
-        if (event.event_link) {
-          const completed = await this.isEventCompleted(event.event_link);
-          if (!completed) {
-            console.log(`Found current event: ${event.Event}`);
-            return event;
-          }
-        }
-      }
-
-      // If no current event or it's completed, get the next upcoming event
-      const nextEvent = await this.query(`
-            SELECT DISTINCT 
-                event_id, Date, Event, City, State, 
-                Country, event_link, event_time
-            FROM events
-            WHERE Date > ?
-            ORDER BY Date ASC
-            LIMIT 1
-        `, [queryDate]);
-
-      if (nextEvent?.length > 0) {
-        console.log(`Found next event: ${nextEvent[0].Event}`);
-        return nextEvent[0];
-      }
-
-      console.log('No current or upcoming events found');
-      return null;
-    } catch (error) {
-      console.error('Error getting current event:', error);
-      throw error;
     }
   }
 
@@ -184,48 +175,99 @@ class PredictionHandler {
 
   static async displayPredictions(interaction, predictions, event, model, cardType = "main") {
     try {
-      const embed = this.createSplitPredictionEmbeds(predictions, event, model, cardType)[0];
-      const modelName = model === "gpt" ? "GPT-4o" : "Claude-3.5";
+        // Add logging
+        console.log("Displaying predictions:", {
+            hasData: !!predictions,
+            fights: predictions?.fights?.length || 0,
+            model,
+            cardType
+        });
 
-      // Create two rows of buttons for better organization
-      const mainButtonsRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`get_analysis_${event.event_id}`)
-          .setLabel(`DM ${modelName} Full Analysis`)
-          .setEmoji("📝")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`market_analysis_${event.event_id}`)
-          .setLabel(`${modelName} Market Intelligence (in progress)`)
-          .setEmoji("🎯")
-          .setStyle(ButtonStyle.Success)
-      );
+        // Count locks (high confidence picks)
+        const locks = predictions.fights.filter(pred => pred.confidence >= 75);
+        const lowConfidenceWarning = locks.length <= 1;
 
-      const secondaryButtonsRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`betting_analysis_${event.event_id}`)
-          .setLabel(`${modelName} Parlays & Props`)
-          .setEmoji("💰")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`show_event_${event.event_id}`)
-          .setLabel("Back to Event")
-          .setEmoji("↩️")
-          .setStyle(ButtonStyle.Secondary)
-      );
+        // Create warning message based on card type
+        let warningMessage;
+        if (lowConfidenceWarning) {
+            if (cardType === "main") {
+                warningMessage = "⚠️ **PARLAY WARNING:** Only " + 
+                    (locks.length === 0 ? "no" : "one") + 
+                    " high-confidence pick found on the main card. Exercise extreme caution with parlays. " +
+                    "Consider single bets or waiting for better opportunities.";
+            } else {
+                warningMessage = "⚠️ **BETTING CAUTION:** Limited high-confidence picks available on prelims. " +
+                    "Higher variance expected. Consider reducing bet sizes or focusing on props.";
+            }
+        }
 
-      await interaction.editReply({
-        embeds: [embed],
-        components: [mainButtonsRow, secondaryButtonsRow],
-      });
+        const embed = this.createSplitPredictionEmbeds(predictions, event, model, cardType)[0];
+        
+        // Add warning to embed if necessary
+        if (lowConfidenceWarning) {
+            embed.addFields({
+                name: "🚨 Risk Alert",
+                value: warningMessage,
+                inline: false
+            });
+        }
+
+        const modelName = model === "gpt" ? "GPT-4o" : "Claude-3.5";
+
+        // Create two rows of buttons for better organization
+        const mainButtonsRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`get_analysis_${event.event_id}`)
+                .setLabel(`DM ${modelName} Full Analysis`)
+                .setEmoji("📝")
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`market_analysis_${event.event_id}`)
+                .setLabel(`${modelName} Market Intelligence`)
+                .setEmoji("🎯")
+                .setStyle(ButtonStyle.Success)
+        );
+
+        const secondaryButtonsRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`betting_analysis_${event.event_id}`)
+                .setLabel(`${modelName} Parlays & Props`)
+                .setEmoji("💰")
+                .setStyle(lowConfidenceWarning ? ButtonStyle.Secondary : ButtonStyle.Primary), // Change style if low confidence
+            new ButtonBuilder()
+                .setCustomId(`show_event_${event.event_id}`)
+                .setLabel("Back to Event")
+                .setEmoji("↩️")
+                .setStyle(ButtonStyle.Secondary)
+        );
+
+        await interaction.editReply({
+            embeds: [embed],
+            components: [mainButtonsRow, secondaryButtonsRow],
+        });
+
+        // If low confidence, send an additional ephemeral message
+        if (lowConfidenceWarning) {
+            setTimeout(async () => {
+                try {
+                    await interaction.followUp({
+                        content: `${warningMessage}\n\n*This message is only visible to you.*`,
+                        ephemeral: true
+                    });
+                } catch (error) {
+                    console.error("Error sending warning followup:", error);
+                }
+            }, 1000); // Small delay to ensure main message is sent first
+        }
+
     } catch (error) {
-      console.error("Error displaying predictions:", error);
-      await interaction.editReply({
-        content: "Error displaying predictions. Please try again.",
-        ephemeral: true,
-      });
+        console.error("Error displaying predictions:", error);
+        await interaction.editReply({
+            content: "Error displaying predictions. Please try again.",
+            ephemeral: true
+        });
     }
-  }
+}
 
   static createSplitPredictionEmbeds(
     predictions,
@@ -237,7 +279,7 @@ class PredictionHandler {
     const modelEmoji = model === "gpt" ? "🧠" : "🤖";
 
     // Get high confidence picks
-    const locks = predictions.fights.filter((pred) => pred.confidence >= 70);
+    const locks = predictions.fights.filter((pred) => pred.confidence >= 75);
 
     const embed = new EmbedBuilder()
       .setColor("#00ff00")
@@ -258,7 +300,7 @@ class PredictionHandler {
     // Add concise fight predictions
     predictions.fights.forEach((pred) => {
       const confidenceEmoji =
-        pred.confidence >= 70 ? "🔒" : pred.confidence >= 60 ? "✅" : "⚖️";
+        pred.confidence >= 75 ? "🔒" : pred.confidence >= 60 ? "✅" : "⚖️";
 
       const methodEmoji = pred.method.includes("KO")
         ? "👊"
@@ -572,8 +614,31 @@ class PredictionHandler {
           }
         }
 
-        // Send betting analysis as before
-        await interaction.user.send({ embeds: [bettingAnalysis] });
+        // Send betting analysis if available
+        if (predictions.betting_analysis) {
+            const bettingAnalysisEmbed = new EmbedBuilder()
+                .setColor("#ffd700")
+                .setTitle("💰 Betting Analysis")
+                .setDescription("Detailed Betting Opportunities")
+                .addFields(
+                    {
+                        name: "🎲 Parlays",
+                        value: this.formatBettingValue(predictions.betting_analysis.parlays) || "No parlay recommendations available",
+                        inline: false
+                    },
+                    {
+                        name: "⚡ Upsets",
+                        value: this.formatBettingValue(predictions.betting_analysis.upsets) || "No upset opportunities identified",
+                        inline: false
+                    },
+                    {
+                        name: "🎯 Props",
+                        value: this.formatBettingValue(predictions.betting_analysis.props) || "No prop recommendations available",
+                        inline: false
+                    }
+                );
+            await interaction.user.send({ embeds: [bettingAnalysisEmbed] });
+        }
 
         // Confirm in channel
         await interaction.editReply({
@@ -598,7 +663,7 @@ class PredictionHandler {
       });
     }
   }
-
+  
   static async handleBettingAnalysis(interaction, eventId) {
     try {
       if (!interaction.deferred && !interaction.replied) {
@@ -625,7 +690,7 @@ class PredictionHandler {
         .setTitle("💰 Betting Analysis 🧠")
         .setDescription("Fight Analysis and Betting Opportunities");
 
-      const locks = predictions.fights.filter((pred) => pred.confidence >= 70);
+      const locks = predictions.fights.filter((pred) => pred.confidence >= 75);
 
       // Parlay Recommendations
       const parlaySection = this.generateEnhancedParlayRecommendations(
@@ -714,7 +779,7 @@ class PredictionHandler {
     }
     return String(value);
   } static generateEnhancedParlayRecommendations(fights) {
-    const locks = fights.filter((pred) => pred.confidence >= 70);
+    const locks = fights.filter((pred) => pred.confidence >= 75);
     const highValuePicks = fights.filter((pred) => pred.confidence >= 65);
 
     let parlayText = [];
@@ -915,120 +980,130 @@ class PredictionHandler {
 
   static async generateNewPredictions(interaction, event, cardType, model) {
     try {
-      const loadingEmbed = new EmbedBuilder()
-        .setColor("#ffff00")
-        .setTitle("🤖 Fight Genie Analysis in Progress")
-        .setDescription(
-          [
-            `Analyzing ${cardType === "main" ? "Main Card" : "Preliminary Card"} fights for ${event.Event}`,
-            "**Processing:**",
-            "• Gathering fighter statistics and historical data",
-            "• Analyzing style matchups and recent performance",
-            "• Calculating win probabilities and confidence levels",
-            "• Generating parlay and prop recommendations",
-            "",
-            `Using ${model.toUpperCase() === "GPT" ? "GPT-4o" : "Claude-3.5"} for enhanced fight analysis...`
-          ].join("\n")
-        );
+        const loadingEmbed = new EmbedBuilder()
+            .setColor("#ffff00")
+            .setTitle("🤖 Fight Genie Analysis in Progress")
+            .setDescription([
+                `Analyzing ${cardType === "main" ? "Main Card" : "Preliminary Card"} fights for ${event.Event}`,
+                "**Processing:**",
+                "• Gathering fighter statistics and historical data",
+                "• Analyzing style matchups and recent performance",
+                "• Calculating win probabilities and confidence levels",
+                "• Generating parlay and prop recommendations",
+                "",
+                `Using ${model.toUpperCase() === "GPT" ? "GPT-4" : "Claude-3.5"} for enhanced fight analysis...`
+            ].join("\n"));
 
-      await interaction.editReply({ embeds: [loadingEmbed] });
+        await interaction.editReply({ embeds: [loadingEmbed] });
 
-      // Get fights based on card type first
-      const fights = cardType === "main"
-        ? await this.getMainCardFights(event.Event)
-        : await this.getPrelimFights(event.Event);
+        // Get all fights and process them
+        const allFights = await database.getEventFights(event.Event);
+        const processedFights = await processEventFights(allFights);
 
-      if (!fights || fights.length === 0) {
-        throw new Error(`No fights found for ${cardType} card`);
-      }
+        // Select the appropriate fights based on card type
+        const fights = cardType === "main" 
+            ? processedFights.mainCard 
+            : processedFights.prelims;
 
-      // Now we can cache the odds since fights is defined
-      await OddsAnalysis.cacheEventOdds(event.event_id, fights);
+        if (!fights || fights.length === 0) {
+            throw new Error(`No fights found for ${cardType} card`);
+        }
 
-      console.log(`Processing ${fights.length} fights for ${cardType} card:`,
-        fights.map(f => `${f.fighter1} vs ${f.fighter2}`));
+        // Cache odds for the fights
+        await OddsAnalysis.cacheEventOdds(event.event_id, fights);
 
-      // Process fights in batches
-      const maxBatchSize = 3;
-      const predictions = [];
-      let bettingAnalysis = null;
+        console.log(`Processing ${fights.length} fights for ${cardType} card:`,
+            fights.map(f => `${f.fighter1} vs ${f.fighter2}`));
 
-      for (let i = 0; i < fights.length; i += maxBatchSize) {
-        const batch = fights.slice(i, i + maxBatchSize);
-        console.log(`Processing batch ${Math.floor(i / maxBatchSize) + 1} of ${Math.ceil(fights.length / maxBatchSize)}`);
+        // Process fights in batches
+        const maxBatchSize = 3;
+        const predictions = [];
+        let bettingAnalysis = null;
+        let successfulPredictions = 0;
 
-        try {
-          // Pass the batch directly rather than accessing fights variable
-          const batchPredictions = await generateEnhancedPredictionsWithAI(batch, event, model);
+        for (let i = 0; i < fights.length; i += maxBatchSize) {
+            const batch = fights.slice(i, i + maxBatchSize);
+            console.log(`Processing batch ${Math.floor(i / maxBatchSize) + 1} of ${Math.ceil(fights.length / maxBatchSize)}`);
 
-          if (batchPredictions && Array.isArray(batchPredictions.fights)) {
-            predictions.push(...batchPredictions.fights);
+            try {
+                const batchPredictions = await generateEnhancedPredictionsWithAI(batch, event, model);
 
-            // Keep betting analysis from final batch
-            if (i + maxBatchSize >= fights.length) {
-              bettingAnalysis = batchPredictions.betting_analysis;
+                if (batchPredictions && Array.isArray(batchPredictions.fights)) {
+                    predictions.push(...batchPredictions.fights);
+                    successfulPredictions += batchPredictions.fights.length;
+
+                    // Keep betting analysis from final batch
+                    if (i + maxBatchSize >= fights.length) {
+                        bettingAnalysis = batchPredictions.betting_analysis;
+                    }
+                }
+            } catch (batchError) {
+                console.error(`Error processing batch ${Math.floor(i / maxBatchSize) + 1}:`, batchError);
+                continue; // Continue with next batch
             }
-          } else {
-            console.error("Invalid batch predictions format:", batchPredictions);
-          }
-        } catch (batchError) {
-          console.error(`Error processing batch ${Math.floor(i / maxBatchSize) + 1}:`, batchError);
+
+            // Add delay between batches
+            if (i + maxBatchSize < fights.length) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         }
 
-        if (i + maxBatchSize < fights.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Check if we have at least some valid predictions
+        if (successfulPredictions === 0) {
+            throw new Error("No valid predictions generated");
         }
-      }
 
-      // Validate we have predictions for all fights
-      if (predictions.length === 0) {
-        throw new Error("No valid predictions generated");
-      }
+        // Create prediction data structure with any valid predictions
+        const predictionData = {
+            fights: predictions,
+            betting_analysis: bettingAnalysis || {
+                upsets: "Unable to generate detailed analysis at this time.",
+                parlays: "Unable to generate parlay suggestions at this time.",
+                props: "Unable to generate prop bet suggestions at this time."
+            }
+        };
 
-      // Create prediction data structure
-      const predictionData = {
-        fights: predictions,
-        betting_analysis: bettingAnalysis || {
-          upsets: "Unable to generate detailed analysis at this time.",
-          parlays: "Unable to generate parlay suggestions at this time.",
-          method_props: "Unable to generate method props at this time.",
-          round_props: "Unable to generate round props at this time.",
-          special_props: "Unable to generate special props at this time."
+        // Store predictions in database
+        await this.storePredictions(event.event_id, cardType, model, predictionData);
+
+        // Display predictions, showing what we have even if incomplete
+        await this.displayPredictions(interaction, predictionData, event, model, cardType);
+
+        // If we didn't get predictions for all fights, add a notice
+        if (successfulPredictions < fights.length) {
+            const warningEmbed = new EmbedBuilder()
+                .setColor("#FFA500")
+                .setTitle("⚠️ Partial Predictions Generated")
+                .setDescription(`Successfully generated predictions for ${successfulPredictions} out of ${fights.length} fights. Some fights may be missing from the analysis.`);
+
+            await interaction.followUp({ embeds: [warningEmbed], ephemeral: true });
         }
-      };
-
-      // Store predictions in database
-      await this.storePredictions(event.event_id, cardType, model, predictionData);
-
-      // Display predictions
-      await this.displayPredictions(interaction, predictionData, event, model, cardType);
 
     } catch (error) {
-      console.error("Error generating new predictions:", error);
+        console.error("Error generating new predictions:", error);
 
-      // Send error message to user
-      const errorEmbed = new EmbedBuilder()
-        .setColor("#ff0000")
-        .setTitle("❌ Error Generating Predictions")
-        .setDescription([
-          "An error occurred while generating predictions.",
-          "",
-          "This can happen if:",
-          "• Fighter data is missing or incomplete",
-          "• The model is temporarily unavailable",
-          "• There are connection issues",
-          "",
-          "Please try again in a few moments."
-        ].join("\n"));
+        const errorEmbed = new EmbedBuilder()
+            .setColor("#ff0000")
+            .setTitle("❌ Error Generating Predictions")
+            .setDescription([
+                "An error occurred while generating predictions.",
+                "",
+                "This can happen if:",
+                "• Fighter data is missing or incomplete",
+                "• The model is temporarily unavailable",
+                "• There are connection issues",
+                "",
+                "Please try again in a few moments."
+            ].join("\n"));
 
-      await interaction.editReply({
-        embeds: [errorEmbed],
-        components: []
-      });
+        await interaction.editReply({
+            embeds: [errorEmbed],
+            components: []
+        });
 
-      throw new Error("Failed to generate valid predictions");
+        throw error;
     }
-  }
+}
 
   // Helper method to validate predictions
   static validatePredictions(predictions) {
@@ -1062,121 +1137,7 @@ class PredictionHandler {
     }
   }
 
-  // Helper method for main card fights
-  static async getMainCardFights(eventName) {
-    const fights = await database.query(`
-      SELECT 
-          event_id,
-          Event,
-          Winner as fighter1,
-          Loser as fighter2,
-          WeightClass,
-          is_main_card,
-          Method
-      FROM events 
-      WHERE Event = ? 
-      AND is_main_card = 1 
-      ORDER BY event_id ASC
-  `, [eventName]);
 
-    return fights.map(fight => ({
-      ...fight,
-      fighter1: fight.fighter1?.trim() || fight.Winner?.trim(),
-      fighter2: fight.fighter2?.trim() || fight.Loser?.trim(),
-      WeightClass: fight.WeightClass || "Unknown",
-      is_main_card: 1
-    }));
-  }
-
-  // Helper method for prelim fights
-  static async getPrelimFights(eventName) {
-    const fights = await database.query(`
-      SELECT 
-          event_id,
-          Event,
-          Winner as fighter1,
-          Loser as fighter2,
-          WeightClass,
-          is_main_card,
-          Method
-      FROM events 
-      WHERE Event = ? 
-      AND is_main_card = 0 
-      ORDER BY event_id ASC
-  `, [eventName]);
-
-    return fights.map(fight => ({
-      ...fight,
-      fighter1: fight.fighter1?.trim() || fight.Winner?.trim(),
-      fighter2: fight.fighter2?.trim() || fight.Loser?.trim(),
-      WeightClass: fight.WeightClass || "Unknown",
-      is_main_card: 0
-    }));
-  }
-
-  static async getMainCardFights(eventName) {
-    try {
-      const fights = await database.query(
-        `
-      SELECT 
-          event_id,
-          Event,
-          Winner as fighter1,
-          Loser as fighter2,
-          WeightClass,
-          is_main_card,
-          Method
-      FROM events 
-      WHERE Event = ? 
-      AND is_main_card = 1 
-      ORDER BY event_id ASC`,
-        [eventName]
-      );
-
-      return fights.map((fight) => ({
-        ...fight,
-        fighter1: fight.fighter1?.trim() || fight.Winner?.trim(),
-        fighter2: fight.fighter2?.trim() || fight.Loser?.trim(),
-        WeightClass: fight.WeightClass || "Unknown",
-        is_main_card: 1,
-      }));
-    } catch (error) {
-      console.error("Error getting main card fights:", error);
-      return [];
-    }
-  }
-
-  static async getPrelimFights(eventName) {
-    try {
-      const fights = await database.query(
-        `
-      SELECT 
-          event_id,
-          Event,
-          Winner as fighter1,
-          Loser as fighter2,
-          WeightClass,
-          is_main_card,
-          Method
-      FROM events 
-      WHERE Event = ? 
-      AND is_main_card = 0 
-      ORDER BY event_id ASC`,
-        [eventName]
-      );
-
-      return fights.map((fight) => ({
-        ...fight,
-        fighter1: fight.fighter1?.trim() || fight.Winner?.trim(),
-        fighter2: fight.fighter2?.trim() || fight.Loser?.trim(),
-        WeightClass: fight.WeightClass || "Unknown",
-        is_main_card: 0,
-      }));
-    } catch (error) {
-      console.error("Error getting prelim fights:", error);
-      return [];
-    }
-  }
 }
 
 

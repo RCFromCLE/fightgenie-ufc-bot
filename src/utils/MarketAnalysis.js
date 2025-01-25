@@ -191,7 +191,7 @@ class MarketAnalysis {
 
     static calculateValueRating(edge, confidence) {
         if (edge >= 20 && confidence >= 75) return 5;
-        if (edge >= 15 && confidence >= 70) return 4;
+        if (edge >= 15 && confidence >= 75) return 4;
         if (edge >= 10 && confidence >= 65) return 3;
         if (edge >= 5 && confidence >= 60) return 2;
         return 1;
@@ -226,7 +226,7 @@ class MarketAnalysis {
     
     static async analyzeParlayOpportunities(fightOdds, marketMetrics) {
         const highConfidencePicks = fightOdds.filter(f => 
-            f.confidence >= 70 && f.edge && f.edge > 5
+            f.confidence >= 75 && f.edge && f.edge > 5
         ).sort((a, b) => b.confidence - a.confidence);
 
         const valueUnderdogs = fightOdds.filter(f => 
@@ -285,7 +285,7 @@ class MarketAnalysis {
     }
 
     static calculateParlayRating(edge, confidence) {
-        if (edge >= 15 && confidence >= 70) return 5;
+        if (edge >= 15 && confidence >= 75) return 5;
         if (edge >= 10 && confidence >= 65) return 4;
         if (edge >= 7.5 && confidence >= 60) return 3;
         if (edge >= 5 && confidence >= 55) return 2;

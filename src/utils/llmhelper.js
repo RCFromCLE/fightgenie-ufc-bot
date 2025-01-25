@@ -680,19 +680,52 @@ Key Requirements for Betting Analysis:
 Remember to maintain maximum confidence of 95% due to MMA's inherent unpredictability. Focus on fight-specific dynamics rather than general observations.`;
 }
 
+function validateBatchPredictions(predictions) {
+  // Check basic structure
+  if (!predictions || !predictions.fights || !Array.isArray(predictions.fights)) {
+      console.error("Missing or invalid fights array");
+      return false;
+  }
+
+  // Validate each fight prediction
+  return predictions.fights.every(fight => {
+      const isValid = (
+          fight.fighter1 && 
+          fight.fighter2 && 
+          fight.predictedWinner &&
+          typeof fight.confidence === 'number' &&
+          fight.confidence >= 55 && 
+          fight.confidence <= 85 &&
+          fight.method &&
+          fight.probabilityBreakdown &&
+          typeof fight.probabilityBreakdown.ko_tko === 'number' &&
+          typeof fight.probabilityBreakdown.submission === 'number' &&
+          typeof fight.probabilityBreakdown.decision === 'number'
+      );
+
+      if (!isValid) {
+          console.error("Invalid fight prediction:", fight);
+      }
+
+      return isValid;
+  });
+}
+
+
 async function generatePredictionsWithGPT(prompt) {
   try {
       // Extract fights data from prompt
       const formattedData = prompt.match(/Fight Analysis Data:\s*([\s\S]*?)(?=For each fight)/);
       if (!formattedData) {
-          throw new Error("No fights data found in prompt");
+          console.error("No fights data found in prompt");
+          throw new Error("Invalid prompt format: missing fights data");
       }
 
       const data = JSON.parse(formattedData[1].trim());
       const enrichedFights = data.enrichedFights || [];
       
       // Split fights into smaller batches
-      const maxFightsPerRequest = 3;
+      const maxFightsPerRequest = 2;
       const allPredictions = {
           fights: [],
           betting_analysis: {}
@@ -713,69 +746,68 @@ async function generatePredictionsWithGPT(prompt) {
               `Fight Analysis Data:\n${JSON.stringify(batchData, null, 2)}\n\n`
           );
 
-          console.log(`Processing batch ${i / maxFightsPerRequest + 1} of ${Math.ceil(enrichedFights.length / maxFightsPerRequest)}`);
-
-          const gptResponse = await openai.chat.completions.create({
-              model: "GPT-4o-turbo-preview",
-              messages: [
-                  {
-                      role: "system",
-                      content: "You are an elite UFC fight analyst focused on statistical analysis and technical matchups. Provide pure JSON responses with detailed, evidence-based predictions."
-                  },
-                  {
-                      role: "user",
-                      content: batchPrompt + "\n\nRespond with only the JSON object, no markdown formatting."
-                  }
-              ],
-              temperature: 0.7,
-              max_tokens: 4096,
-              top_p: 0.9,
-              frequency_penalty: 0.1,
-              presence_penalty: 0.1
-          });
-
-          if (!gptResponse.choices[0]?.message?.content) {
-              throw new Error("No prediction content received from GPT");
-          }
-
-          const content = gptResponse.choices[0].message.content;
-          console.log(`GPT Raw Response for batch ${i / maxFightsPerRequest + 1}:`, content);
-
-          // Clean the JSON response
-          const cleanedContent = content
-              .replace(/```json\n?/g, "")
-              .replace(/```\n?/g, "")
-              .replace(/[\u201C\u201D]/g, '"')
-              .replace(/[\u2018\u2019]/g, "'")
-              .replace(/\n+/g, " ")
-              .replace(/\s+/g, " ")
-              .replace(/,\s*([}\]])/g, "$1")
-              .trim();
+          console.log(`Processing batch ${Math.floor(i / maxFightsPerRequest) + 1} of ${Math.ceil(enrichedFights.length / maxFightsPerRequest)}`);
 
           try {
-              const batchPredictions = JSON.parse(cleanedContent);
-              
-              // Validate and merge predictions
-              if (batchPredictions.fights && Array.isArray(batchPredictions.fights)) {
-                  allPredictions.fights.push(...batchPredictions.fights);
-                  
-                  // Keep betting analysis from final batch
-                  if (i + maxFightsPerRequest >= enrichedFights.length) {
-                      allPredictions.betting_analysis = batchPredictions.betting_analysis || {};
-                  }
+              const gptResponse = await openai.chat.completions.create({
+                  model: "gpt-4",
+                  messages: [
+                      {
+                          role: "system",
+                          content: "You are an elite UFC fight analyst focused on statistical analysis and technical matchups. Provide pure JSON responses with detailed, evidence-based predictions."
+                      },
+                      {
+                          role: "user",
+                          content: batchPrompt + "\n\nRespond with only the JSON object, no markdown formatting."
+                      }
+                  ],
+                  temperature: 0.7,
+                  max_tokens: 2000,
+                  top_p: 0.9,
+                  frequency_penalty: 0.1,
+                  presence_penalty: 0.1
+              });
+
+              if (!gptResponse.choices[0]?.message?.content) {
+                  console.error("Empty response from GPT");
+                  throw new Error("Empty response from GPT");
               }
-          } catch (parseError) {
-              console.error("Parse error for batch:", parseError);
-              console.error("Cleaned content:", cleanedContent);
-              continue;
+
+              const content = gptResponse.choices[0].message.content;
+              console.log(`GPT Raw Response for batch ${Math.floor(i / maxFightsPerRequest) + 1}:`, content);
+
+              // Clean and parse the JSON response
+              const cleanedContent = cleanJsonString(content);
+              const batchPredictions = JSON.parse(cleanedContent);
+
+              // Validate batch predictions
+              if (!validateBatchPredictions(batchPredictions)) {
+                  console.error("Invalid batch predictions format:", batchPredictions);
+                  throw new Error("Invalid prediction format");
+              }
+
+              // Merge valid predictions
+              allPredictions.fights.push(...batchPredictions.fights);
+              
+              // Keep betting analysis from final batch
+              if (i + maxFightsPerRequest >= enrichedFights.length) {
+                  allPredictions.betting_analysis = batchPredictions.betting_analysis || {};
+              }
+
+          } catch (batchError) {
+              console.error(`Error processing batch ${Math.floor(i / maxFightsPerRequest) + 1}:`, batchError);
+              // Continue with next batch instead of failing completely
           }
-          
+
           // Add delay between batches
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (i + maxFightsPerRequest < enrichedFights.length) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+          }
       }
 
-      // Validate final predictions
+      // Final validation of complete predictions
       if (!allPredictions.fights || allPredictions.fights.length === 0) {
+          console.error("No valid predictions generated after processing all batches");
           throw new Error("No valid predictions generated");
       }
 
@@ -795,7 +827,7 @@ async function generatePredictionsWithGPT(prompt) {
 async function generatePredictionsWithClaude(prompt) {
   try {
       const ClaudeResponse = await anthropic.messages.create({
-          model: "Claude-3.5-3-opus-20240229",
+          model: "claude-3-5-sonnet-latest",
           max_tokens: 4000,
           temperature: 0.7,
           top_p: 0.9,
@@ -898,11 +930,13 @@ function generateSimplifiedPrediction() {
 
 function cleanJsonString(text) {
   return text
-      .replace(/[\u201C\u201D]/g, '"') // Replace smart quotes with straight quotes
-      .replace(/[\u2018\u2019]/g, "'") // Replace smart single quotes
-      .replace(/[\n\r]+/g, " ")        // Replace newlines with spaces
-      .replace(/\s+/g, " ")            // Normalize spaces
-      .replace(/,\s*([}\]])/g, "$1")   // Remove trailing commas
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/,\s*([}\]])/g, "$1")
       .trim();
 }
 
@@ -1133,5 +1167,7 @@ module.exports = {
   generateEnhancedPredictionsWithAI,
   generatePredictionsWithGPT,
   generatePredictionsWithClaude,
-  comparePhysicalAttributes
+  comparePhysicalAttributes,
+  validateBatchPredictions,
+  cleanJsonString
 };

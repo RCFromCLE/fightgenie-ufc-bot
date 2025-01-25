@@ -18,164 +18,178 @@ class EventImageHandler {
         }
     }
 
-    static async findTapologyEvent(eventName) {
+    static async findTapologyEvent(event) {
         try {
-            console.log('Finding event for:', eventName);
-            
-            // Handle different UFC event name formats
-            let searchPath;
-            
-            // Check for numbered UFC event
-            const numberedMatch = eventName.match(/UFC\s+(\d+)/i);
-            if (numberedMatch) {
-                searchPath = `ufc-${numberedMatch[1]}`;
-            } 
-            // Check for Fight Night format
-            else if (eventName.toLowerCase().includes('fight night')) {
-                const cleanName = eventName
-                    .toLowerCase()
-                    .replace('ufc fight night:', '')
-                    .replace('ufc fight night', '')
-                    .trim()
-                    .replace(/\s+/g, '-')
-                    .replace(/[^a-z0-9-]/g, '');
-                
-                searchPath = `ufc-fight-night-${cleanName}`;
-            }
-            // Handle any other UFC event format
-            else if (eventName.toLowerCase().includes('ufc')) {
-                const cleanName = eventName
-                    .toLowerCase()
-                    .replace('ufc', '')
-                    .trim()
-                    .replace(/\s+/g, '-')
-                    .replace(/[^a-z0-9-]/g, '');
-                    
-                searchPath = `ufc-${cleanName}`;
-            } else {
-                console.log('Not a UFC event:', eventName);
+            if (!event || typeof event !== 'object') {
+                console.log('Invalid event object received:', event);
                 return null;
             }
-    
-            // Try different Tapology URL patterns
-            const urls = [
-                `${this.BASE_URL}/fightcenter/events/${searchPath}`,
-                `${this.BASE_URL}/fightcenter/schedule/${searchPath}`,
-                `${this.BASE_URL}/fightcenter/schedule/2024/${searchPath}`
-            ];
-    
-            console.log('Trying URLs:', urls);
-    
-            for (const searchUrl of urls) {
+
+            console.log('Finding event:', event);
+            
+            // Safely extract and validate the date
+            let formattedDate = '';
+            if (event.Date) {
                 try {
-                    const response = await axios.get(searchUrl, {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36'
-                        }
-                    });
-    
-                    const $ = cheerio.load(response.data);
-                    
-                    // Updated selectors based on Tapology's current structure
-                    const possibleSelectors = [
-                        'img[alt="UFC 310"]',
-                        'img[class*="max-h-52"]',
-                        '.poster img',
-                        '.event_card img',
-                        '.main_event_images img',
-                        '.details_head_poster img',
-                        '.event_banner img',
-                        'img.fight_card_poster',
-                        '.event-details img',
-                        '.fight-card-header img'
-                    ];
-    
-                    for (const selector of possibleSelectors) {
-                        const img = $(selector).first();
-                        if (img.length) {
-                            const imgSrc = img.attr('src');
-                            if (imgSrc) {
-                                console.log('Found image:', imgSrc);
-                                return imgSrc.startsWith('http') ? imgSrc : `${this.BASE_URL}${imgSrc}`;
-                            }
-                        }
+                    const eventDate = new Date(event.Date);
+                    if (!isNaN(eventDate.getTime())) {  // Check if date is valid
+                        formattedDate = eventDate.toLocaleDateString('en-US', { 
+                            month: 'numeric', 
+                            day: 'numeric', 
+                            year: 'numeric' 
+                        });
+                        console.log('Looking for event on:', formattedDate);
+                    } else {
+                        console.log('Invalid date format:', event.Date);
                     }
-    
-                    // Try finding by event name in image attributes
-                    const allImages = $('img').filter((_, elem) => {
-                        const src = $(elem).attr('src') || '';
-                        const alt = $(elem).attr('alt') || '';
-                        return (
-                            src.toLowerCase().includes(searchPath) || 
-                            alt.toLowerCase().includes(eventName.toLowerCase())
-                        );
-                    });
-    
-                    if (allImages.length > 0) {
-                        const imgSrc = allImages.first().attr('src');
-                        if (imgSrc) {
-                            return imgSrc.startsWith('http') ? imgSrc : `${this.BASE_URL}${imgSrc}`;
-                        }
-                    }
-                } catch (urlError) {
-                    console.log('Error trying URL:', searchUrl, urlError.message);
-                    continue;
+                } catch (dateError) {
+                    console.error('Error parsing date:', dateError);
                 }
             }
-    
-            console.log('No image found for event:', eventName);
-            return null;
-        } catch (error) {
-            console.error('Error finding event:', error);
-            return null;
-        }
-    }
 
-    static async getCachedImage(eventNumber) {
-        const cacheFile = path.join(this.CACHE_DIR, `ufc-${eventNumber}.jpg`);
-        try {
-            const stats = await fs.stat(cacheFile);
-            if (Date.now() - stats.mtime.getTime() < this.CACHE_DURATION) {
-                const data = await fs.readFile(cacheFile);
-                return data;
+            // Get base event name if it exists
+            const eventName = event.Event || '';
+            if (!eventName) {
+                console.log('No event name found in event object');
+                return null;
             }
+
+            // Fetch the Tapology homepage
+            console.log('Fetching Tapology homepage...');
+            const homeResponse = await axios.get(this.BASE_URL, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+            });
+
+            const $ = cheerio.load(homeResponse.data);
+            let eventLink = null;
+
+            // Search for the event link in the homepage content
+            console.log('Searching for event:', eventName);
+            $('a').each((_, elem) => {
+                const href = $(elem).attr('href');
+                const text = $(elem).text();
+                
+                // Skip invalid elements
+                if (!href || !text) return;
+                
+                // Convert to lowercase for comparison
+                const textLower = text.toLowerCase();
+                const eventNameLower = eventName.toLowerCase();
+                
+                if (href && textLower.includes('ufc') && textLower.includes(eventNameLower)) {
+                    console.log('Found matching event link:', href);
+                    eventLink = href;
+                    return false; // Break the loop
+                }
+            });
+
+            if (!eventLink) {
+                console.log('No event link found for:', eventName);
+                return null;
+            }
+
+            // Complete the URL if it's relative
+            const eventUrl = eventLink.startsWith('http') ? eventLink : `${this.BASE_URL}${eventLink}`;
+            console.log('Accessing event page:', eventUrl);
+
+            // Fetch the event page
+            const eventResponse = await axios.get(eventUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+            });
+
+            const eventPage = cheerio.load(eventResponse.data);
+            
+            // Look for the event poster
+            console.log('Searching for poster image...');
+            const posterSelectors = [
+                'img[src*="fight-poster"]',
+                'img[src*="event-poster"]',
+                '.fight_card_poster img',
+                '.event_poster img',
+                'img.poster_img',
+                '.poster img',
+                '#poster_image img',
+                'img[src*="poster"]'
+            ];
+
+            for (const selector of posterSelectors) {
+                const posterImg = eventPage(selector).first();
+                if (posterImg.length) {
+                    const imgSrc = posterImg.attr('src');
+                    if (imgSrc && !imgSrc.includes('missing') && !imgSrc.includes('loader')) {
+                        console.log('Found poster image:', imgSrc);
+                        return imgSrc.startsWith('http') ? imgSrc : `${this.BASE_URL}${imgSrc}`;
+                    }
+                }
+            }
+
+            // If no poster found, try to find any UFC-related image
+            console.log('No poster found, looking for any UFC-related image...');
+            const ufcImage = eventPage('img[src*="ufc"]').first();
+            if (ufcImage.length) {
+                const imgSrc = ufcImage.attr('src');
+                if (imgSrc && !imgSrc.includes('missing') && !imgSrc.includes('loader')) {
+                    console.log('Found UFC image:', imgSrc);
+                    return imgSrc.startsWith('http') ? imgSrc : `${this.BASE_URL}${imgSrc}`;
+                }
+            }
+
+            console.log('No suitable image found for event:', eventName);
             return null;
+
         } catch (error) {
+            console.error('Error in findTapologyEvent:', error);
             return null;
         }
     }
 
-    static async saveToCache(imageData, eventNumber) {
-        const cacheFile = path.join(this.CACHE_DIR, `ufc-${eventNumber}.jpg`);
-        try {
-            await fs.writeFile(cacheFile, imageData);
-        } catch (error) {
-            console.error('Error saving to cache:', error);
-        }
-    }
-
-    static async getEventImage(event) {
+static async getEventImage(event) {
         try {
             await this.ensureCacheDir();
     
-            const eventNumber = event.Event.match(/UFC\s+(\d+)/i)?.[1];
-            if (!eventNumber) {
-                console.log('Could not extract event number from:', event.Event);
-                return new AttachmentBuilder('./src/images/FightGenie_Logo_1.PNG', { 
-                    name: 'FightGenie_Logo_1.PNG' 
-                });
+            // Generate a cache key based on event name
+            let cacheKey;
+            const numberedMatch = event.Event.match(/UFC\s+(\d+)/i);
+            const fightNightMatch = event.Event.match(/UFC Fight Night:\s*(.+)/i);
+            
+            if (numberedMatch) {
+                cacheKey = `ufc-${numberedMatch[1]}`;
+            } else if (fightNightMatch) {
+                // Clean the fighter names for the cache key
+                const cleanNames = fightNightMatch[1]
+                    .toLowerCase()
+                    .replace(/\s+vs\.?\s+/, '-vs-')
+                    .replace(/[^a-z0-9-]/g, '')
+                    .trim();
+                cacheKey = `fight-night-${cleanNames}`;
+            } else {
+                // Fallback for other event formats
+                cacheKey = event.Event
+                    .toLowerCase()
+                    .replace(/\s+/g, '-')
+                    .replace(/[^a-z0-9-]/g, '')
+                    .trim();
             }
+
+            console.log('Using cache key:', cacheKey);
     
-            const cachedImage = await this.getCachedImage(eventNumber);
+            const cachedImage = await this.getCachedImage(cacheKey);
             if (cachedImage) {
-                console.log('Using cached image for UFC', eventNumber);
+                console.log('Using cached image for', cacheKey);
                 return new AttachmentBuilder(cachedImage, { 
-                    name: `ufc-${eventNumber}.jpg`,
-                    description: `UFC ${eventNumber} Event Poster`
+                    name: `${cacheKey}.jpg`,
+                    description: `${event.Event} Event Poster`
                 });
             }
     
-            const imageUrl = await this.findTapologyEvent(event.Event);
+            // Pass the full event object here instead of just event.Event
+            const imageUrl = await this.findTapologyEvent(event);
             if (imageUrl) {
                 console.log('Found Tapology image:', imageUrl);
                 
@@ -195,15 +209,14 @@ class EventImageHandler {
                     });
     
                     if (response.data) {
-                        // Minimal processing to maintain original format
                         const processedImage = await sharp(Buffer.from(response.data))
                             .jpeg({ quality: 90 })
                             .toBuffer();
     
-                        await this.saveToCache(processedImage, eventNumber);
+                        await this.saveToCache(processedImage, cacheKey);
     
                         return new AttachmentBuilder(processedImage, { 
-                            name: `ufc-${eventNumber}.jpg`
+                            name: `${cacheKey}.jpg`
                         });
                     }
                 } catch (imageError) {
@@ -211,6 +224,7 @@ class EventImageHandler {
                 }
             }
     
+            console.log('Falling back to logo for event:', event.Event);
             return new AttachmentBuilder('./src/images/FightGenie_Logo_1.PNG', { 
                 name: 'FightGenie_Logo_1.PNG' 
             });
@@ -222,7 +236,33 @@ class EventImageHandler {
             });
         }
     }
-        
+    
+    // Also update the getCachedImage method to handle string-based keys
+    static async getCachedImage(cacheKey) {
+        const cacheFile = path.join(this.CACHE_DIR, `${cacheKey}.jpg`);
+        try {
+            const stats = await fs.stat(cacheFile);
+            if (Date.now() - stats.mtime.getTime() < this.CACHE_DURATION) {
+                const data = await fs.readFile(cacheFile);
+                return data;
+            }
+            return null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Update saveToCache to handle string-based keys
+    static async saveToCache(imageData, cacheKey) {
+        const cacheFile = path.join(this.CACHE_DIR, `${cacheKey}.jpg`);
+        try {
+            await fs.writeFile(cacheFile, imageData);
+        } catch (error) {
+            console.error('Error saving to cache:', error);
+        }
+    }
+    
+    
     static async modifyEventEmbed(embed, event) {
         try {
             const imageAttachment = await this.getEventImage(event);
@@ -230,13 +270,25 @@ class EventImageHandler {
                 name: 'FightGenie_Logo_1.PNG'
             });
     
-            embed.setImage(`attachment://${imageAttachment.name}`)  // Set image before description
-                .setThumbnail('attachment://FightGenie_Logo_1.PNG');
-    
-            return {
-                embed,
-                files: [imageAttachment, logoAttachment]
-            };
+            // If we got an event image that's not the logo
+            if (imageAttachment.name !== 'FightGenie_Logo_1.PNG') {
+                embed
+                    .setImage(`attachment://${imageAttachment.name}`)
+                    .setThumbnail('attachment://FightGenie_Logo_1.PNG');
+                
+                return {
+                    embed,
+                    files: [imageAttachment, logoAttachment]
+                };
+            } else {
+                // If we only have the logo, just use it as thumbnail
+                embed.setThumbnail('attachment://FightGenie_Logo_1.PNG');
+                
+                return {
+                    embed,
+                    files: [logoAttachment]
+                };
+            }
         } catch (error) {
             console.error('Error modifying embed:', error);
             const fallbackAttachment = new AttachmentBuilder(

@@ -282,6 +282,47 @@ async initializeDatabase() {
     }
   }
 
+  async getEventFights(eventName) {
+    try {
+        console.log(`Getting fights for event: ${eventName}`);
+        
+        const fights = await this.query(`
+            SELECT DISTINCT
+                event_id,
+                Event,
+                COALESCE(fighter1, Winner) as fighter1,
+                COALESCE(fighter2, Loser) as fighter2,
+                WeightClass,
+                is_main_card,
+                Date,
+                Method,
+                Round
+            FROM events 
+            WHERE Event = ?
+            ORDER BY is_main_card DESC, event_id ASC
+        `, [eventName]);
+
+        console.log(`Raw fights from database:`, fights);
+
+        if (!fights || fights.length === 0) {
+            console.log(`No fights found for event: ${eventName}`);
+            return [];
+        }
+
+        return fights.map(fight => ({
+            ...fight,
+            fighter1: fight.fighter1?.trim() || null,
+            fighter2: fight.fighter2?.trim() || null,
+            WeightClass: fight.WeightClass || 'Unknown',
+            is_main_card: fight.is_main_card === 1
+        })).filter(fight => fight.fighter1 && fight.fighter2);
+
+    } catch (error) {
+        console.error(`Error getting fights for ${eventName}:`, error);
+        return [];
+    }
+}
+
   async getHistoricalPredictions(eventId) {
     try {
       const query = `
@@ -755,136 +796,78 @@ async verifyAccess(serverId, eventId = null) {
     }
   }
 
-  async getCurrentEvent() {
+
+  static async getCurrentEvent() {
     try {
-      const currentDate = new Date().toISOString().slice(0, 10);
+        // Use a window of time that includes the current day and previous day for late events
+        const query = `
+            SELECT DISTINCT 
+                event_id, Date, Event, City, State, 
+                Country, event_link, event_time
+            FROM events 
+            WHERE Date IN (date('now', '-1 day'), date('now'))
+            AND Event LIKE 'UFC%'
+            ORDER BY Date DESC
+            LIMIT 1
+        `;
 
-      const event = await this.query(
-        `
-        SELECT DISTINCT event_id, Date, Event, City, State, Country, event_link
-        FROM events 
-        WHERE Date = ?
-        LIMIT 1
-      `,
-        [currentDate]
-      );
-
-      console.log("Direct query result:", event);
-
-      if (event && event.length > 0) {
-        return event[0];
-      }
-      return null;
-    } catch (error) {
-      console.error("Error getting current event:", error);
-      throw error;
-    }
-  }
-
-  async getUpcomingEvent() {
-    try {
-      // First try to get today's event
-      const currentEvent = await this.getCurrentEvent();
-      if (currentEvent) {
-        console.log("Found current event:", currentEvent.Event);
-        return currentEvent;
-      }
-
-      // Only if no current event, get next event
-      const currentDate = new Date().toISOString().slice(0, 10);
-      const nextEvent = await this.query(
-        `
-        SELECT DISTINCT event_id, Date, Event, City, State, Country, event_link
-        FROM events
-        WHERE Date > ?
-        ORDER BY Date ASC
-        LIMIT 1
-      `,
-        [currentDate]
-      );
-
-      if (nextEvent && nextEvent.length > 0) {
-        console.log("No current event, found next event:", nextEvent[0].Event);
-        return nextEvent[0];
-      }
-
-      // If nothing found, scrape new data
-      console.log("No events found, scraping new data...");
-      const scrapedEvent = await this.scrapeUpcomingEvent();
-
-      if (scrapedEvent && scrapedEvent.fights) {
-        for (const fight of scrapedEvent.fights) {
-          await this.insertEventFight(scrapedEvent, fight);
+        const result = await database.query(query, []);
+        
+        if (result?.length > 0) {
+            console.log(`Found current event: ${result[0].Event}`);
+            return result[0];
         }
-      }
-
-      return scrapedEvent;
+        
+        console.log("No current event found");
+        return null;
     } catch (error) {
-      console.error("Error in getUpcomingEvent:", error.message);
-      throw error;
+        console.error("Error in getCurrentEvent:", error);
+        throw error;
     }
-  }
+}
+static async getUpcomingEvent() {
+  try {
+      // First try to get current event
+      let event = await this.getCurrentEvent();
+      
+      // If no current event, get next upcoming
+      if (!event) {
+          const query = `
+              SELECT DISTINCT 
+                  event_id, Date, Event, City, State, 
+                  Country, event_link, event_time
+              FROM events 
+              WHERE Date >= date('now', '-1 day')
+              AND Event LIKE 'UFC%'
+              ORDER BY Date ASC
+              LIMIT 1
+          `;
 
-  async scrapeUpcomingEvent() {
-    try {
-      console.log("Starting to scrape upcoming event...");
-
-      const eventLink = await this.getDirectEventLink();
-      if (!eventLink) {
-        throw new Error("Could not find event link");
+          const result = await database.query(query, []);
+          if (result?.length > 0) {
+              event = result[0];
+          }
       }
 
-      console.log("Found event link:", eventLink);
-      const eventResponse = await axios.get(eventLink);
-      const $ = cheerio.load(eventResponse.data);
-
-      // Get event name with multiple fallbacks
-      const eventName =
-        $("h2.b-content__title").text().trim() ||
-        $(".b-content__title-highlight").text().trim() ||
-        $("h1.hero-event-name").text().trim() ||
-        "Upcoming UFC Event";
-
-      // Enhanced date scraping
-      let dateText = this.scrapeEventDate($);
-      if (!dateText) {
-        console.warn("Could not find event date, using current date");
-        dateText = new Date().toISOString().split("T")[0];
+      if (!event) {
+          throw new Error("No current or upcoming events found");
       }
 
-      // Enhanced location scraping
-      let locationText = this.scrapeEventLocation($);
-      console.log("Found location text:", locationText);
+      // Get fights for the event
+      const fights = await database.getEventFights(event.Event);
+      if (!fights || fights.length === 0) {
+          console.log("No fights found for event:", event.Event);
+      }
 
-      const date = this.parseDate(dateText);
-      const [city, state, country] = this.parseLocation(locationText);
-
-      // Scrape fights
-      const fights = this.scrapeFights($);
-
-      const eventData = {
-        Event: eventName,
-        Date: date,
-        City: city,
-        State: state,
-        Country: country,
-        event_link: eventLink,
-        fights: fights,
-      };
-
-      console.log("Successfully scraped event data:", {
-        ...eventData,
-        fights: `Found ${fights.length} fights`,
-      });
-
-      return eventData;
-    } catch (error) {
-      console.error("Error in scrapeUpcomingEvent:", error);
+      return event;
+  } catch (error) {
+      console.error("Error in getUpcomingEvent:", error);
       throw error;
-    }
   }
+}
 
-  scrapeEventDate($) {
+
+scrapeEventDate($) {
     const dateSelectors = [
       '.b-list__box-list li:contains("Date:")',
       ".b-statistics__date",
@@ -1025,71 +1008,6 @@ async verifyAccess(serverId, eventId = null) {
     }
   }
 
-  async getEventFights(eventName) {
-    try {
-        let fights = await this.query(`
-            SELECT
-                event_id,
-                COALESCE(fighter1, Winner) as fighter1,
-                COALESCE(fighter2, Loser) as fighter2,
-                WeightClass,
-                Round,
-                Method,
-                is_main_card,
-                Date
-            FROM events
-            WHERE Event = ?
-            ORDER BY event_id ASC`,
-            [eventName]
-        );
-
-        // If no fighter names found, try to scrape fresh data
-        if (fights.every(fight => !fight.fighter1 || !fight.fighter2)) {
-            console.log("No fighter names found, scraping fresh data...");
-            const scrapedEvent = await this.scrapeUpcomingEvent();
-
-            // Update existing fights with fighter names
-            if (scrapedEvent && scrapedEvent.fights) {
-                for (let i = 0; i < Math.min(fights.length, scrapedEvent.fights.length); i++) {
-                    await this.query(`
-                        UPDATE events 
-                        SET fighter1 = ?, fighter2 = ?
-                        WHERE event_id = ?`,
-                        [
-                            scrapedEvent.fights[i].fighter1,
-                            scrapedEvent.fights[i].fighter2,
-                            fights[i].event_id
-                        ]
-                    );
-                }
-
-                // Get updated fights data
-                fights = await this.query(`
-                    SELECT
-                        event_id,
-                        COALESCE(fighter1, Winner) as fighter1,
-                        COALESCE(fighter2, Loser) as fighter2,
-                        WeightClass,
-                        Round,
-                        Method,
-                        is_main_card,
-                        Date
-                    FROM events
-                    WHERE Event = ?
-                    ORDER BY event_id ASC`,
-                    [eventName]
-                );
-            }
-        }
-
-        console.log(`Retrieved ${fights.length} fights from database:`, 
-            JSON.stringify(fights, null, 2));
-        return fights;
-    } catch (error) {
-        console.error("Error getting event fights:", error);
-        throw error;
-    }
-}
 
 async insertEventFight(event, fight) {
   try {

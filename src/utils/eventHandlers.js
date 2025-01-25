@@ -18,44 +18,184 @@ const MarketAnalysis = require('../utils/MarketAnalysis');
 const EventImageHandler = require('./EventImageHandler');
 
 class EventHandlers {
-  static async getUpcomingEvent() {
-    try {
-      // First try to get current event
-      let event = await database.getCurrentEvent();
-
-      // If no current event, get next upcoming
-      if (!event) {
-        event = await database.getUpcomingEvent();
-      }
-
-      if (!event) {
-        throw new Error("No current or upcoming events found.");
-      }
-
-      // Get fights for the event
-      const fights = await database.getEventFights(event.Event);
-      if (!fights || fights.length === 0) {
-        console.log("No fights found for event:", event.Event);
-      }
-
-      return event;
-    } catch (error) {
-      console.error("Error in getUpcomingEvent:", error.message);
-      throw error;
-    }
-  }
 
   static async getCurrentEvent() {
     try {
-      const event = await database.getCurrentEvent();
-      return event;
-    } catch (error) {
-      console.error("Error getting current event:", error);
-      throw error;
-    }
-  }
+        // Use a window of time that includes the current day and previous day for late events
+        const query = `
+            SELECT DISTINCT 
+                event_id, Date, Event, City, State, 
+                Country, event_link, event_time
+            FROM events 
+            WHERE Date IN (date('now', '-1 day'), date('now'))
+            AND Event LIKE 'UFC%'
+            ORDER BY Date DESC
+            LIMIT 1
+        `;
 
-  static async cleanupFightCard(fights) {
+        const result = await database.query(query, []);
+        
+        if (result?.length > 0) {
+            console.log(`Found current event: ${result[0].Event}`);
+            return result[0];
+        }
+        
+        console.log("No current event found");
+        return null;
+    } catch (error) {
+        console.error("Error in getCurrentEvent:", error);
+        throw error;
+    }
+}
+
+static async getUpcomingEvent() {
+  try {
+      // Get current date in local timezone
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const currentDate = `${year}-${month}-${day}`;
+      
+      console.log('Current date and time:', {
+          localTime: now.toLocaleString(),
+          searchDate: currentDate
+      });
+
+      // First try: exact date match
+      let query = `
+          SELECT 
+              event_id,
+              Date,
+              Event,
+              City,
+              State, 
+              Country,
+              event_link,
+              event_time
+          FROM events 
+          WHERE Date = ?
+          AND Event LIKE 'UFC%'
+          GROUP BY Event, Date, City, State, Country, event_link, event_time
+          LIMIT 1
+      `;
+
+      let result = await database.query(query, [currentDate]);
+      
+      // If no exact match, check nearby dates
+      if (!result || result.length === 0) {
+          console.log('No exact date match, checking nearby dates...');
+          
+          query = `
+              SELECT 
+                  event_id,
+                  Date,
+                  Event,
+                  City,
+                  State, 
+                  Country,
+                  event_link,
+                  event_time
+              FROM events 
+              WHERE Date BETWEEN date(?, '-3 days') AND date(?, '+3 days')
+              AND Event LIKE 'UFC%'
+              GROUP BY Event, Date, City, State, Country, event_link, event_time
+              ORDER BY ABS(julianday(Date) - julianday(?))
+              LIMIT 1
+          `;
+          
+          result = await database.query(query, [currentDate, currentDate, currentDate]);
+          
+          if (result && result.length > 0) {
+              console.log('Found event in nearby dates:', result[0]);
+          } else {
+              // If still no result, try future events
+              query = `
+                  SELECT 
+                      event_id,
+                      Date,
+                      Event,
+                      City,
+                      State, 
+                      Country,
+                      event_link,
+                      event_time
+                  FROM events 
+                  WHERE Date > ?
+                  AND Event LIKE 'UFC%'
+                  GROUP BY Event, Date, City, State, Country, event_link, event_time
+                  ORDER BY Date ASC
+                  LIMIT 1
+              `;
+              
+              result = await database.query(query, [currentDate]);
+          }
+      }
+
+      if (!result || result.length === 0) {
+          console.log('No events found in any date range');
+          throw new Error("No upcoming events found");
+      }
+
+      const event = result[0];
+      console.log('Selected event:', event);
+
+      // Get fights for this event
+      const fights = await database.query(`
+          SELECT DISTINCT
+              event_id,
+              fighter1,
+              fighter2,
+              WeightClass,
+              is_main_card
+          FROM events 
+          WHERE Event = ? 
+          AND Date = ?
+          AND fighter1 IS NOT NULL 
+          AND fighter2 IS NOT NULL
+          ORDER BY is_main_card DESC, event_id ASC
+      `, [event.Event, event.Date]);
+
+      if (fights && fights.length > 0) {
+          console.log(`Found ${fights.length} fights for event ${event.Event}`);
+          event.fights = fights;
+      } else {
+          console.log(`No fights found for event ${event.Event}`);
+          // Try without the date constraint if no fights found
+          const fallbackFights = await database.query(`
+              SELECT DISTINCT
+                  event_id,
+                  fighter1,
+                  fighter2,
+                  WeightClass,
+                  is_main_card
+              FROM events 
+              WHERE Event = ? 
+              AND fighter1 IS NOT NULL 
+              AND fighter2 IS NOT NULL
+              ORDER BY is_main_card DESC, event_id ASC
+          `, [event.Event]);
+          
+          if (fallbackFights && fallbackFights.length > 0) {
+              console.log(`Found ${fallbackFights.length} fights using fallback query`);
+              event.fights = fallbackFights;
+          }
+      }
+
+      if (!event.fights || event.fights.length === 0) {
+          throw new Error("No fights found for event");
+      }
+
+      return event;
+
+  } catch (error) {
+      console.error("Error in getUpcomingEvent:", error);
+      console.error('Stack trace:', error.stack);
+      throw error;
+  }
+}
+
+static async cleanupFightCard(fights) {
     const fighterCounts = new Map();
     fights.forEach((fight) => {
       fighterCounts.set(
@@ -144,67 +284,6 @@ class EventHandlers {
     } catch (error) {
       console.error("Error checking event completion:", error);
       return false;
-    }
-  }
-
-  async getCurrentEvent() {
-    try {
-      // Get current date in EST
-      const estOptions = { timeZone: "America/New_York" };
-      const currentDateEST = new Date().toLocaleString("en-US", estOptions);
-      const queryDate = new Date(currentDateEST).toISOString().slice(0, 10);
-
-      console.log(`Looking for current event on ${queryDate} (EST)`);
-
-      // First try to get today's event
-      const todayEvent = await this.query(
-        `
-            SELECT DISTINCT 
-                event_id, Date, Event, City, State, 
-                Country, event_link, event_time
-            FROM events 
-            WHERE Date = ?
-            LIMIT 1
-        `,
-        [queryDate]
-      );
-
-      if (todayEvent && todayEvent.length > 0) {
-        const event = todayEvent[0];
-        // If today's event exists, check if it's completed
-        if (event.event_link) {
-          const completed = await this.isEventCompleted(event.event_link);
-          if (!completed) {
-            console.log(`Found current event: ${event.Event}`);
-            return event;
-          }
-        }
-      }
-
-      // If no current event or it's completed, get the next upcoming event
-      const nextEvent = await this.query(
-        `
-            SELECT DISTINCT 
-                event_id, Date, Event, City, State, 
-                Country, event_link, event_time
-            FROM events
-            WHERE Date > ?
-            ORDER BY Date ASC
-            LIMIT 1
-        `,
-        [queryDate]
-      );
-
-      if (nextEvent?.length > 0) {
-        console.log(`Found next event: ${nextEvent[0].Event}`);
-        return nextEvent[0];
-      }
-
-      console.log("No current or upcoming events found");
-      return null;
-    } catch (error) {
-      console.error("Error getting current event:", error);
-      throw error;
     }
   }
 

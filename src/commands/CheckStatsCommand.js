@@ -48,7 +48,7 @@ class CheckStatsCommand {
                     JOIN stored_predictions sp ON po.prediction_id = sp.prediction_id
                     GROUP BY sp.model_used
                 ),
-                model_rankings AS (
+                model_rankings AS ( 
                     SELECT *,
                         RANK() OVER (ORDER BY fight_accuracy DESC) as fight_rank,
                         RANK() OVER (ORDER BY method_accuracy DESC) as method_rank,

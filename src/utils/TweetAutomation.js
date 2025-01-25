@@ -224,7 +224,7 @@ class TweetAutomation {
 
             if (event?.[0]) {
                 // Create a date object and format it properly
-                const eventDate = new Date(event[0].Date + 'T00:00:00-07:00'); // Assuming PT timezone
+                const eventDate = new Date(event[0].Date); // Assuming PT timezone
                 return {
                     ...event[0],
                     Date: eventDate.toISOString() // This ensures consistent date handling
@@ -370,7 +370,7 @@ class TweetAutomation {
             // Get only the highest confidence pick
             const highConfidencePicks = await Promise.all(
                 fights
-                    .filter(fight => fight.confidence >= 70)
+                    .filter(fight => fight.confidence >= 75)
                     .map(async fight => {
                         const fighterStats = await database.query(
                             'SELECT * FROM fighters WHERE Name = ?',
@@ -499,7 +499,7 @@ class TweetAutomation {
                             return {
                                 isCorrect: fight.predictedWinner?.trim() === result.winner,
                                 confidence: Number(fight.confidence) || 0,
-                                isHighConfidence: (Number(fight.confidence) || 0) >= 70
+                                isHighConfidence: (Number(fight.confidence) || 0) >= 75
                             };
                         }).filter(Boolean);
 
@@ -742,6 +742,7 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             // Calculate dates & event info
             const now = new Date();
             const eventDate = new Date(event.Date);
+            eventDate.setDate(eventDate.getDate() + 1);
             const daysUntilEvent = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
             const isFightWeek = daysUntilEvent <= 7;
             const nextWeek = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
@@ -1438,11 +1439,11 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
                         THEN 1 ELSE 0 
                     END) as correct_predictions,
                     SUM(CASE 
-                        WHEN CAST(NULLIF(json_extract(fight, '$.confidence'), '') AS DECIMAL) >= 70 
+                        WHEN CAST(NULLIF(json_extract(fight, '$.confidence'), '') AS DECIMAL) >= 75 
                         THEN 1 ELSE 0 
                     END) as total_locks,
                     SUM(CASE 
-                        WHEN CAST(NULLIF(json_extract(fight, '$.confidence'), '') AS DECIMAL) >= 70 
+                        WHEN CAST(NULLIF(json_extract(fight, '$.confidence'), '') AS DECIMAL) >= 75 
                         AND (
                             LOWER(json_extract(fight, '$.correct')) IN ('true', '1')
                             OR json_extract(fight, '$.correct') = 1
