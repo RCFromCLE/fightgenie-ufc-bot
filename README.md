@@ -18,9 +18,7 @@ Fight Genie is an advanced UFC fight prediction system utilizing dual AI models 
 - [Data Processing](#data-processing)
 - [Prediction System](#prediction-system)
 - [Security & Privacy](#security--privacy)
-- [Payment Integration](#payment-integration)
 - [Deployment](#deployment)
-- [Future Roadmap](#future-roadmap)
 
 ## Overview
 
@@ -34,6 +32,9 @@ Fight Genie is an advanced UFC fight prediction system utilizing dual AI models 
 - Detailed statistical analysis
 
 ### Access Tiers
+
+- Below is outdated. The Genie is 100% free!
+
 - Event Access: $6.99 (expires 1:30 AM EST post-event)
 - Lifetime Access: $50.00 (permanent server access)
 - Solana Payments: 10% discount on all tiers
@@ -150,7 +151,7 @@ Edge Formula:
 
 ### Payment Integration
 
-#### Solana Integration
+#### Solana Integration (outdated, Genie is free)
 ```javascript
 Price Determination:
 1. Jupiter API query for current SOL price
@@ -159,7 +160,7 @@ Price Determination:
 4. Real-time conversion updates
 ```
 
-#### Stripe (Apple Pay) Integration Integration
+#### Stripe (Apple Pay) Integration Integration (Genie is now free, outdated)
 ```javascript
 1. Creates secure checkout sessions with:
 - Apple Pay and card payment options
@@ -189,6 +190,8 @@ Price Determination:
 
 #### PayPal Processing
 ```javascript
+
+- No longer relevant, genie is free.
 Payment Flow:
 1. Create PayPal order
 2. Process payment
@@ -213,17 +216,6 @@ Not Stored:
 - IP Addresses
 ```
 
-### Access Verification
-```javascript
-Verification Process:
-1. Check lifetime access
-2. Verify event access if needed
-3. Validate subscription status
-4. Grant appropriate permissions
-```
-
-## Testing & Validation
-
 ### Prediction Accuracy
 ```javascript
 Tracking Metrics:
@@ -233,30 +225,6 @@ Tracking Metrics:
 4. Confidence correlation
 5. Edge validation
 ```
-
-### Performance Monitoring
-```javascript
-Key Metrics:
- Response time
-1. Data freshness
-2. System uptime
-```
-
-## Future Roadmap
-
-### Azure Migration
-Planned migration to cloud infrastructure if utilization increases:
-1. Azure SQL Database
-2. Azure App Service
-3. Azure Functions
-5. Azure Monitoring
-
-### Feature Expansion
-1. Enhanced statistical modeling
-2. Additional payment methods
-3. Advanced parlay analysis
-4. Mobile application
-5. API access
 
 ## Documentation Notes
 
@@ -278,13 +246,6 @@ Admin Commands:
 ### Support
 For technical support or inquiries:
 - Email: rudycorradetti4@gmail.com
-
-### Contributing
-[Contributing guidelines and information]
-
-### License
-[License information]
-
 ---
 
 ## Technical Specifications
@@ -295,12 +256,3 @@ For technical support or inquiries:
 - Discord.js v14+
 - Minimum 2GB RAM
 - 10GB Storage
-
-### Installation
-[Installation instructions]
-
-### Configuration
-[Configuration details]
-
-### Testing
-[Testing procedures]
