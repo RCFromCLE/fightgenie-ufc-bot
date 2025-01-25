@@ -197,115 +197,248 @@ class AdminEventCommand {
             await message.reply('An error occurred while fetching upcoming events.');
         }
     }
+
+
     static async scrapeUpcomingEvents() {
         try {
             const response = await axios.get('http://www.ufcstats.com/statistics/events/upcoming');
             const $ = cheerio.load(response.data);
             const events = [];
-
-            $('.b-statistics__table-row').each((_, row) => {
+    
+            // Process each row sequentially
+            for (const row of $('.b-statistics__table-row').toArray()) {
                 const $row = $(row);
-                const name = $row.find('.b-statistics__table-col:first-child').text().trim();
-                const date = $row.find('.b-statistics__table-col:nth-child(2)').text().trim();
-                const location = $row.find('.b-statistics__table-col:nth-child(3)').text().trim();
+                const nameField = $row.find('.b-statistics__table-col:first-child').text().trim();
                 const link = $row.find('a').attr('href');
-
-                if (name && date && link) {
-                    events.push({ name, date, location, link });
+                const locationField = $row.find('.b-statistics__table-col:nth-child(2)').text().trim();
+    
+                if (nameField && link) {
+                    const name = nameField.split('\n')[0].trim();
+                    const dateMatch = nameField.match(/([A-Za-z]+ \d+, \d{4})/);
+                    let fights = [];
+    
+                    console.log(`Scraping event: ${name} at ${link}`);
+    
+                    // Get the event details page
+                    try {
+                        const eventPage = await axios.get(link);
+                        const $event = cheerio.load(eventPage.data);
+                        
+                        // Try different selectors for upcoming events
+                        const fightElements = $event('.c-listing-fight__content') // Try new structure first
+                            .length ? $event('.c-listing-fight__content') : 
+                            $event('.b-fight-details__table-row'); // Fall back to old structure
+    
+                        fightElements.each((idx, fightEl) => {
+                            const $fight = $event(fightEl);
+                            
+                            // Try different selectors for fighter names
+                            let fighters = [];
+                            
+                            // Try new structure selectors
+                            const fighter1 = $fight.find('.c-listing-fight__corner-name--red').text().trim();
+                            const fighter2 = $fight.find('.c-listing-fight__corner-name--blue').text().trim();
+                            
+                            if (fighter1 && fighter2) {
+                                fighters = [fighter1, fighter2];
+                            } else {
+                                // Try old structure selectors
+                                fighters = $fight.find('td:first-child a, .b-fight-details__table-col a')
+                                    .map((_, el) => $event(el).text().trim())
+                                    .get();
+                            }
+    
+                            // Try different selectors for weight class
+                            let weightClass = $fight.find('.c-listing-fight__class-text').text().trim() ||
+                                            $fight.find('td:nth-child(7)').text().trim() ||
+                                            'TBD';
+    
+                            console.log(`Found fighters: ${fighters.join(' vs ')} (${weightClass})`);
+    
+                            if (fighters.length === 2) {
+                                fights.push({
+                                    fighter1: fighters[0],
+                                    fighter2: fighters[1],
+                                    WeightClass: weightClass,
+                                    is_main_card: idx < 5 ? 1 : 0
+                                });
+                            }
+                        });
+    
+                        // If still no fights, try scraping from different page sections
+                        if (fights.length === 0) {
+                            const mainCardSection = $event('#card-tabs-1');
+                            const prelimSection = $event('#card-tabs-2');
+    
+                            [mainCardSection, prelimSection].forEach((section, sectionIdx) => {
+                                section.find('.l-listing__item').each((idx, item) => {
+                                    const $item = $event(item);
+                                    const fighter1 = $item.find('.c-listing__name:first').text().trim();
+                                    const fighter2 = $item.find('.c-listing__name:last').text().trim();
+                                    const weightClass = $item.find('.c-listing__term').text().trim() || 'TBD';
+    
+                                    if (fighter1 && fighter2) {
+                                        fights.push({
+                                            fighter1,
+                                            fighter2,
+                                            WeightClass: weightClass,
+                                            is_main_card: sectionIdx === 0 ? 1 : 0
+                                        });
+                                    }
+                                });
+                            });
+                        }
+    
+                    } catch (error) {
+                        console.error(`Error scraping event page ${link}:`, error);
+                    }
+    
+                    events.push({ 
+                        name: name,
+                        date: dateMatch ? dateMatch[0] : '',
+                        location: locationField,
+                        link: link,
+                        fights: fights
+                    });
+    
+                    console.log(`Added event ${name} with ${fights.length} fights`);
                 }
-            });
-
+            }
+    
+            console.log(`Scraped ${events.length} events with fights:`, events);
             return events;
         } catch (error) {
             console.error('Error scraping upcoming events:', error);
             return null;
         }
-    }
+    }    
 
-static async storeNewEvent(event) {
-    try {
-        console.log('Processing event:', event); // Debug log
-
-        // Parse location
-        const [city, country] = (event.location || '').split(',').map(s => s.trim());
-
-        // Parse date properly
-        let formattedDate;
+    static async storeNewEvent(event) {
         try {
-            // Example date format from UFCStats: "December 07, 2024"
-            const dateStr = event.date.trim();
-            const dateParts = dateStr.match(/([A-Za-z]+)\s+(\d+),\s*(\d{4})/);
+            console.log('Starting to process event:', event);
+            const [city, state, country] = (event.location || '').split(',').map(s => s.trim());
+            let formattedDate;
+    
+            try {
+                const dateStr = event.date.trim();
+                const dateParts = dateStr.match(/([A-Za-z]+)\s+(\d+),\s*(\d{4})/);
+                if (!dateParts) throw new Error(`Invalid date format: ${dateStr}`);
+    
+                const months = {
+                    'January': '01', 'February': '02', 'March': '03', 'April': '04',
+                    'May': '05', 'June': '06', 'July': '07', 'August': '08',
+                    'September': '09', 'October': '10', 'November': '11', 'December': '12'
+                };
+    
+                const month = months[dateParts[1]];
+                const day = dateParts[2].padStart(2, '0');
+                const year = dateParts[3];
+    
+                formattedDate = `${year}-${month}-${day}`;
+            } catch (dateError) {
+                console.error('Date parsing error:', dateError);
+                throw new Error(`Failed to parse date: ${event.date}`);
+            }
+    
+            // Clean up existing event records
+            await database.query(`
+                DELETE FROM market_analysis 
+                WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
+            `, [event.name]);
             
-            if (!dateParts) {
-                throw new Error(`Invalid date format: ${dateStr}`);
+            await database.query(`
+                DELETE FROM prediction_outcomes 
+                WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
+            `, [event.name]);
+            
+            await database.query(`
+                DELETE FROM stored_predictions 
+                WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
+            `, [event.name]);
+            
+            await database.query('DELETE FROM events WHERE Event = ?', [event.name]);
+    
+            console.log(`Fetching fights from ${event.link}`);
+            const response = await axios.get(event.link);
+            const $ = cheerio.load(response.data);
+            let fights = [];
+    
+            // Process each fight row in the table
+            $('.b-fight-details__table-row').each((idx, row) => {
+                const $row = $(row);
+    
+                // Get both fighters from the table cells
+                const fighters = $row.find('.b-link.b-link_style_black')
+                    .map((_, el) => $(el).text().trim())
+                    .get()
+                    .filter(name => name && !name.includes('View') && !name.includes('Matchup'));
+    
+                // Get weight class from the table cell
+                const weightClass = $row.find('.b-fight-details__table-text')
+                    .filter((_, el) => {
+                        const text = $(el).text().trim();
+                        return text.includes('weight') || text.includes('Weight');
+                    })
+                    .first()
+                    .text()
+                    .trim();
+    
+                if (fighters.length === 2) {
+                    fights.push({
+                        fighter1: fighters[0],
+                        fighter2: fighters[1],
+                        WeightClass: weightClass || 'TBD',
+                        is_main_card: idx < 5 ? 1 : 0
+                    });
+                    console.log(`Found fight: ${fighters[0]} vs ${fighters[1]} (${weightClass})`);
+                }
+            });
+    
+            console.log(`Total fights found: ${fights.length}`);
+    
+            // Store each fight as a separate entry
+            for (const fight of fights) {
+                const fightQuery = `
+                    INSERT INTO events (
+                        Event, Date, City, State, Country,
+                        fighter1, fighter2, WeightClass,
+                        event_link, is_main_card
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `;
+    
+                await database.query(fightQuery, [
+                    event.name,
+                    formattedDate,
+                    city,
+                    state,
+                    country,
+                    fight.fighter1,
+                    fight.fighter2,
+                    fight.WeightClass,
+                    event.link,
+                    fight.is_main_card
+                ]);
+    
+                console.log(`Stored fight ${fight.fighter1} vs ${fight.fighter2}`);
             }
-
-            const months = {
-                'January': '01', 'February': '02', 'March': '03', 'April': '04',
-                'May': '05', 'June': '06', 'July': '07', 'August': '08',
-                'September': '09', 'October': '10', 'November': '11', 'December': '12'
-            };
-
-            const month = months[dateParts[1]];
-            const day = dateParts[2].padStart(2, '0');
-            const year = dateParts[3];
-
-            if (!month || !day || !year) {
-                throw new Error(`Unable to parse date components from: ${dateStr}`);
+    
+            if (fights.length === 0) {
+                throw new Error('No fights could be scraped from the event page');
             }
-
-            formattedDate = `${year}-${month}-${day}`;
-            console.log('Formatted date:', formattedDate); // Debug log
-        } catch (dateError) {
-            console.error('Date parsing error:', dateError);
-            throw new Error(`Failed to parse date: ${event.date}`);
+    
+            console.log(`Successfully stored event: ${event.name} with ${fights.length} fights`);
+            return true;
+    
+        } catch (error) {
+            console.error('Error storing new event:', {
+                error: error.message,
+                event: event,
+                stack: error.stack
+            });
+            throw error;
         }
-
-        // Store in database with better error logging
-        const query = `
-            INSERT INTO events (
-                Event, Date, City, Country, event_link, is_completed
-            ) VALUES (?, ?, ?, ?, ?, 0)
-            ON CONFLICT(event_link) DO UPDATE SET
-                Event = excluded.Event,
-                Date = excluded.Date,
-                City = excluded.City,
-                Country = excluded.Country,
-                is_completed = 0
-        `;
-
-        const params = [
-            event.name,
-            formattedDate,
-            city,
-            country,
-            event.link
-        ];
-
-        console.log('Executing query with params:', params); // Debug log
-
-        await database.query(query, params);
-
-        // Update existing event status
-        await database.query(`
-            UPDATE events 
-            SET is_completed = 1
-            WHERE Date < ?
-        `, [formattedDate]);
-
-        console.log(`Successfully stored new event: ${event.name}`);
-        return true;
-
-    } catch (error) {
-        console.error('Error storing new event:', {
-            error: error.message,
-            event: event,
-            stack: error.stack
-        });
-        throw error;
     }
-}
-
+    
     static async handleAdvanceEvent(message) {
         try {
             // Verify admin permissions
@@ -316,14 +449,16 @@ static async storeNewEvent(event) {
                 });
                 return;
             }
-
+    
+            console.log("Starting event advancement process...");
+    
             // First, let's clean up duplicates and fix completed status
             await database.query(`
                 UPDATE events 
                 SET is_completed = 0 
                 WHERE Date > date('now')
             `);
-
+    
             // Get the earliest uncompleted event
             const currentEvent = await database.query(`
                 SELECT DISTINCT 
@@ -334,12 +469,14 @@ static async storeNewEvent(event) {
                 ORDER BY Date ASC 
                 LIMIT 1
             `);
-
+    
             if (!currentEvent?.[0]) {
-                // If no current event, fetch upcoming events
+                console.log("No current event found, fetching upcoming events...");
                 return await this.handleUpcomingEvents(message);
             }
-
+    
+            console.log(`Current event found: ${currentEvent[0].Event}`);
+    
             // Mark this event as completed
             await database.query(`
                 UPDATE events
@@ -347,7 +484,7 @@ static async storeNewEvent(event) {
                     completed_at = datetime('now')
                 WHERE event_id = ?
             `, [currentEvent[0].event_id]);
-
+    
             // Get the next event
             const nextEvent = await database.query(`
                 SELECT DISTINCT 
@@ -358,7 +495,62 @@ static async storeNewEvent(event) {
                 ORDER BY Date ASC
                 LIMIT 1
             `, [currentEvent[0].Date]);
-
+    
+            // Force refresh fight data for next event
+            if (nextEvent?.[0]?.event_link) {
+                console.log(`Refreshing fight data for next event: ${nextEvent[0].Event}`);
+                try {
+                    const response = await axios.get(nextEvent[0].event_link);
+                    const $ = cheerio.load(response.data);
+                    const fights = [];
+    
+                    $('.b-fight-details__table-row').each((index, row) => {
+                        const fighters = $(row).find('.b-fight-details__table-col:first-child a')
+                            .map((_, el) => $(el).text().trim()).get();
+                        const weightClass = $(row).find('td:nth-child(7)').text().trim();
+    
+                        if (fighters.length === 2) {
+                            fights.push({
+                                fighter1: fighters[0],
+                                fighter2: fighters[1],
+                                WeightClass: weightClass,
+                                is_main_card: index < 5 ? 1 : 0
+                            });
+                        }
+                    });
+    
+                    if (fights.length > 0) {
+                        // Clear existing fights for this event
+                        await database.query('DELETE FROM events WHERE Event = ?', [nextEvent[0].Event]);
+    
+                        // Store updated fights
+                        for (const fight of fights) {
+                            await database.query(`
+                                INSERT INTO events (
+                                    Event, Date, City, State, Country,
+                                    fighter1, fighter2, WeightClass,
+                                    event_link, is_main_card
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            `, [
+                                nextEvent[0].Event,
+                                nextEvent[0].Date,
+                                nextEvent[0].City,
+                                nextEvent[0].State,
+                                nextEvent[0].Country,
+                                fight.fighter1,
+                                fight.fighter2,
+                                fight.WeightClass,
+                                nextEvent[0].event_link,
+                                fight.is_main_card
+                            ]);
+                        }
+                        console.log(`Successfully updated ${fights.length} fights for next event`);
+                    }
+                } catch (scrapeError) {
+                    console.error('Error refreshing fight data:', scrapeError);
+                }
+            }
+    
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('✅ Events Advanced Successfully')
@@ -386,7 +578,7 @@ static async storeNewEvent(event) {
                     '',
                     'Use `$upcoming` to view the new current event.'
                 ].join('\n'));
-
+    
             await message.reply({ 
                 embeds: [embed],
                 files: [{
@@ -394,7 +586,7 @@ static async storeNewEvent(event) {
                     name: 'FightGenie_Logo_1.PNG'
                 }]
             });
-
+    
         } catch (error) {
             console.error('Error advancing event:', error);
             await message.reply('An error occurred while advancing the event. Please try again.');

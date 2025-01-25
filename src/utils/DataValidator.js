@@ -30,7 +30,6 @@ class DataValidator {
 
             const fighterStats = stats[0];
             
-            // Calculate record string
             const record = {
                 wins: fighterStats.wins || 0,
                 losses: fighterStats.losses || 0,
@@ -84,7 +83,6 @@ class DataValidator {
             };
         }
     }
-
     static async createStatsReportEmbed(event, fights) {
         try {
             const embed = new EmbedBuilder()
@@ -128,12 +126,39 @@ class DataValidator {
                 }
             }
     
-            // Split long lists into chunks of appropriate size
-            const chunkSize = 15; // Adjust this number to control field size
+            // Reduce chunk size to stay under Discord's 1024 character limit
+            const chunkSize = 5; // Reduced from 15
             
+            // Function to create smaller chunks that fit within Discord's limits
+            const createSafeChunks = (entries) => {
+                const chunks = [];
+                let currentChunk = [];
+                let currentLength = 0;
+                
+                entries.forEach(entry => {
+                    // Calculate length including the newlines we'll add when joining
+                    const entryLength = entry.length + 2; // +2 for '\n\n'
+                    
+                    if (currentLength + entryLength > 1000) { // Using 1000 to be safe
+                        chunks.push(currentChunk);
+                        currentChunk = [entry];
+                        currentLength = entryLength;
+                    } else {
+                        currentChunk.push(entry);
+                        currentLength += entryLength;
+                    }
+                });
+                
+                if (currentChunk.length > 0) {
+                    chunks.push(currentChunk);
+                }
+                
+                return chunks;
+            };
+    
             // Add complete fighters in chunks
             if (statuses.complete.length > 0) {
-                const chunks = this.chunkArray(statuses.complete, chunkSize);
+                const chunks = createSafeChunks(statuses.complete);
                 chunks.forEach((chunk, index) => {
                     embed.addFields({
                         name: index === 0 ? '🟢 Complete Stats' : '🟢 Complete Stats (continued)',
@@ -145,7 +170,7 @@ class DataValidator {
     
             // Add needs update fighters in chunks
             if (statuses.needsUpdate.length > 0) {
-                const chunks = this.chunkArray(statuses.needsUpdate, chunkSize);
+                const chunks = createSafeChunks(statuses.needsUpdate);
                 chunks.forEach((chunk, index) => {
                     embed.addFields({
                         name: index === 0 ? '🟡 Needs Update' : '🟡 Needs Update (continued)',
@@ -157,7 +182,7 @@ class DataValidator {
     
             // Add missing data fighters in chunks
             if (statuses.missing.length > 0) {
-                const chunks = this.chunkArray(statuses.missing, chunkSize);
+                const chunks = createSafeChunks(statuses.missing);
                 chunks.forEach((chunk, index) => {
                     embed.addFields({
                         name: index === 0 ? '🔴 Missing Data' : '🔴 Missing Data (continued)',
@@ -184,7 +209,7 @@ class DataValidator {
             throw error;
         }
     }
-    
+        
     // Helper method to chunk arrays
     static chunkArray(array, size) {
         const chunks = [];
