@@ -47,5 +47,5 @@ directory_structure.PNG
 *.bak
 *.backup
 *_backup
-
+codebase.md
 admin_logs_archive
