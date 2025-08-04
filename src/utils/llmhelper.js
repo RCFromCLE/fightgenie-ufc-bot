@@ -5,6 +5,7 @@ const Anthropic = require("@anthropic-ai/sdk");
 const OpenAI = require("openai");
 const database = require("../database");
 const PredictionModel = require("../models/prediction");
+const CommonOpponentAnalyzer = require("./CommonOpponentAnalyzer");
 
 // Initialize clients with API keys
 const anthropic = new Anthropic({
@@ -16,7 +17,7 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true,
 });
 
-async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "Claude-3.5") {
+async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "Claude") {
   try {
       console.log("Starting prediction generation with model:", model);
       console.log("Number of fights to analyze:", fightData.length);
@@ -29,6 +30,12 @@ async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "
                   const fighter1Data = await getFighterCompleteData(fight.fighter1);
                   const fighter2Data = await getFighterCompleteData(fight.fighter2);
                   const matchupAnalysis = await PredictionModel.analyzeFightMatchup(
+                      fight.fighter1,
+                      fight.fighter2
+                  );
+
+                  // Get common opponent analysis
+                  const commonOpponentData = await CommonOpponentAnalyzer.analyzeCommonOpponents(
                       fight.fighter1,
                       fight.fighter2
                   );
@@ -80,6 +87,7 @@ async function generateEnhancedPredictionsWithAI(fightData, eventInfo, model = "
                           historical: historicalMatchup,
                           stylistic: styleMatchup,
                           physical: physicalComparison,
+                          commonOpponents: commonOpponentData
                       },
                   };
               } catch (error) {
@@ -126,7 +134,13 @@ For each fight, analyze:
 - Improvements or declines in key areas
 - Recovery and durability factors
 
-4. Fight-Specific Factors:
+4. Common Opponent Analysis:
+- Performance against shared opponents
+- Comparative results against similar fighting styles
+- Insights from historical matchups with common opponents
+- Stylistic advantages revealed through common opponent performance
+
+5. Fight-Specific Factors:
 - Weight class dynamics and size advantages
 - Cardio and pace considerations
 - Tournament/rankings implications
@@ -511,14 +525,95 @@ function analyzeRecentPerformance(fights) {
 function compareCompetitionLevel(fighter1Fights, fighter2Fights) {
   if (!fighter1Fights || !fighter2Fights) return null;
 
-  const f1Opponents = fighter1Fights.map(f => f.opponent_name);
-  const f2Opponents = fighter2Fights.map(f => f.opponent_name);
+  const f1Opponents = fighter1Fights.map(f => f.opponent_name || f.Opponent || f.opponent);
+  const f2Opponents = fighter2Fights.map(f => f.opponent_name || f.Opponent || f.opponent);
+
+  // Calculate common opponents
+  const commonOpponents = f1Opponents.filter(opponent => f2Opponents.includes(opponent));
+
+  // Calculate average opponent quality (if available)
+  const f1OpponentQuality = calculateOpponentQuality(fighter1Fights);
+  const f2OpponentQuality = calculateOpponentQuality(fighter2Fights);
 
   return {
-    fighter1TopOpponents: f1Opponents.length,
-    fighter2TopOpponents: f2Opponents.length,
-    levelDifferential: calculateLevelDifferential(fighter1Fights, fighter2Fights)
+    fighter1TotalOpponents: f1Opponents.length,
+    fighter2TotalOpponents: f2Opponents.length,
+    commonOpponents: commonOpponents,
+    commonOpponentCount: commonOpponents.length,
+    fighter1OpponentQuality: f1OpponentQuality,
+    fighter2OpponentQuality: f2OpponentQuality,
+    levelDifferential: calculateLevelDifferential(f1OpponentQuality, f2OpponentQuality),
+    competitionAdvantage: determineCompetitionAdvantage(f1OpponentQuality, f2OpponentQuality, commonOpponents.length)
   };
+}
+
+function calculateOpponentQuality(fights) {
+  if (!fights || fights.length === 0) return 0;
+
+  // Calculate quality based on opponent win rates and rankings if available
+  let totalQuality = 0;
+  let validFights = 0;
+
+  fights.forEach(fight => {
+    // Basic quality score based on fight outcome and method
+    let fightQuality = 50; // Base score
+
+    // Adjust based on fight result
+    if (fight.result === 'Win' || fight.Result === 'Win') {
+      fightQuality += 20;
+    } else if (fight.result === 'Loss' || fight.Result === 'Loss') {
+      fightQuality -= 10;
+    }
+
+    // Adjust based on method (finishing opponents is higher quality)
+    const method = fight.method || fight.Method || '';
+    if (method.includes('KO') || method.includes('TKO') || method.includes('Submission')) {
+      fightQuality += 15;
+    }
+
+    // Adjust based on opponent ranking if available
+    if (fight.opponent_ranking || fight.OpponentRanking) {
+      const ranking = parseInt(fight.opponent_ranking || fight.OpponentRanking);
+      if (ranking <= 5) fightQuality += 30;
+      else if (ranking <= 10) fightQuality += 20;
+      else if (ranking <= 15) fightQuality += 10;
+    }
+
+    totalQuality += fightQuality;
+    validFights++;
+  });
+
+  return validFights > 0 ? totalQuality / validFights : 0;
+}
+
+function calculateLevelDifferential(quality1, quality2) {
+  if (typeof quality1 !== 'number' || typeof quality2 !== 'number') return 0;
+  
+  const differential = quality1 - quality2;
+  
+  // Normalize to a scale
+  if (Math.abs(differential) < 5) return 0; // Negligible difference
+  if (Math.abs(differential) < 15) return differential > 0 ? 1 : -1; // Slight advantage
+  if (Math.abs(differential) < 25) return differential > 0 ? 2 : -2; // Moderate advantage
+  return differential > 0 ? 3 : -3; // Significant advantage
+}
+
+function determineCompetitionAdvantage(quality1, quality2, commonOpponentCount) {
+  const qualityDiff = quality1 - quality2;
+  
+  if (commonOpponentCount >= 2) {
+    // Strong comparison possible with common opponents
+    if (Math.abs(qualityDiff) < 5) return "Even with strong comparison data";
+    return qualityDiff > 0 ? "Fighter 1 advantage (verified)" : "Fighter 2 advantage (verified)";
+  } else if (commonOpponentCount === 1) {
+    // Limited comparison data
+    if (Math.abs(qualityDiff) < 10) return "Even with limited comparison data";
+    return qualityDiff > 0 ? "Fighter 1 slight advantage" : "Fighter 2 slight advantage";
+  } else {
+    // No common opponents
+    if (Math.abs(qualityDiff) < 15) return "Even competition level";
+    return qualityDiff > 0 ? "Fighter 1 higher competition level" : "Fighter 2 higher competition level";
+  }
 }
 
 function determineFinishingPreference(stats) {
@@ -724,8 +819,8 @@ async function generatePredictionsWithGPT(prompt) {
       const data = JSON.parse(formattedData[1].trim());
       const enrichedFights = data.enrichedFights || [];
       
-      // Split fights into smaller batches
-      const maxFightsPerRequest = 2;
+      // Split fights into smaller batches - process one fight at a time
+      const maxFightsPerRequest = 1;
       const allPredictions = {
           fights: [],
           betting_analysis: {}
@@ -735,50 +830,203 @@ async function generatePredictionsWithGPT(prompt) {
       for (let i = 0; i < enrichedFights.length; i += maxFightsPerRequest) {
           const fightsBatch = enrichedFights.slice(i, i + maxFightsPerRequest);
           
-          // Create a modified prompt for this batch
-          const batchData = {
-              ...data,
-              enrichedFights: fightsBatch
-          };
+          // Create a simplified data structure with only essential information
+          const simplifiedFight = fightsBatch.map(fight => ({
+              fighter1: fight.fighter1,
+              fighter2: fight.fighter2,
+              WeightClass: fight.WeightClass,
+              is_main_card: fight.is_main_card,
+              fighter1Stats: {
+                  basics: {
+                      Name: fight.fighter1Stats?.basics?.Name,
+                      SLPM: fight.fighter1Stats?.basics?.SLPM,
+                      StrAcc: fight.fighter1Stats?.basics?.StrAcc,
+                      SApM: fight.fighter1Stats?.basics?.SApM,
+                      StrDef: fight.fighter1Stats?.basics?.StrDef,
+                      TDAvg: fight.fighter1Stats?.basics?.TDAvg,
+                      TDAcc: fight.fighter1Stats?.basics?.TDAcc,
+                      TDDef: fight.fighter1Stats?.basics?.TDDef,
+                      SubAvg: fight.fighter1Stats?.basics?.SubAvg
+                  },
+                  effectiveness: fight.fighter1Stats?.effectiveness
+              },
+              fighter2Stats: {
+                  basics: {
+                      Name: fight.fighter2Stats?.basics?.Name,
+                      SLPM: fight.fighter2Stats?.basics?.SLPM,
+                      StrAcc: fight.fighter2Stats?.basics?.StrAcc,
+                      SApM: fight.fighter2Stats?.basics?.SApM,
+                      StrDef: fight.fighter2Stats?.basics?.StrDef,
+                      TDAvg: fight.fighter2Stats?.basics?.TDAvg,
+                      TDAcc: fight.fighter2Stats?.basics?.TDAcc,
+                      TDDef: fight.fighter2Stats?.basics?.TDDef,
+                      SubAvg: fight.fighter2Stats?.basics?.SubAvg
+                  },
+                  effectiveness: fight.fighter2Stats?.effectiveness
+              },
+              matchupAnalysis: {
+                  stylistic: fight.matchupAnalysis?.stylistic,
+                  physical: fight.matchupAnalysis?.physical,
+                  commonOpponents: fight.matchupAnalysis?.commonOpponents ? {
+                      commonOpponentCount: fight.matchupAnalysis.commonOpponents.commonOpponentCount,
+                      performanceInsights: fight.matchupAnalysis.commonOpponents.performanceInsights
+                  } : null
+              }
+          }));
           
-          const batchPrompt = prompt.replace(
-              /Fight Analysis Data:[\s\S]*?(?=For each fight)/,
-              `Fight Analysis Data:\n${JSON.stringify(batchData, null, 2)}\n\n`
-          );
+          // Create a simplified prompt for this batch
+          const simplifiedPrompt = `
+You are an elite UFC fight analyst. Analyze this fight and provide a prediction in JSON format.
+
+Event: ${data.event.Event}
+Fight: ${fightsBatch[0].fighter1} vs ${fightsBatch[0].fighter2}
+Weight Class: ${fightsBatch[0].WeightClass}
+
+Fight Data:
+${JSON.stringify({ event: data.event, fights: simplifiedFight }, null, 2)}
+
+Provide a prediction in this exact JSON format:
+{
+  "fights": [
+    {
+      "fighter1": "${fightsBatch[0].fighter1}",
+      "fighter2": "${fightsBatch[0].fighter2}",
+      "predictedWinner": "Name",
+      "confidence": <55-85>,
+      "method": "KO/TKO/Submission/Decision",
+      "reasoning": "Brief analysis",
+      "keyFactors": ["Factor 1", "Factor 2", "Factor 3"],
+      "probabilityBreakdown": {
+        "ko_tko": <percentage>,
+        "submission": <percentage>,
+        "decision": <percentage>
+      }
+    }
+  ]
+}
+
+Respond with only the JSON object, no markdown formatting.`;
 
           console.log(`Processing batch ${Math.floor(i / maxFightsPerRequest) + 1} of ${Math.ceil(enrichedFights.length / maxFightsPerRequest)}`);
 
           try {
-              const gptResponse = await openai.chat.completions.create({
-                  model: "gpt-4",
-                  messages: [
-                      {
-                          role: "system",
-                          content: "You are an elite UFC fight analyst focused on statistical analysis and technical matchups. Provide pure JSON responses with detailed, evidence-based predictions."
-                      },
-                      {
-                          role: "user",
-                          content: batchPrompt + "\n\nRespond with only the JSON object, no markdown formatting."
+              let gptResponse;
+              let retryCount = 0;
+              const maxRetries = 3;
+              
+              while (retryCount < maxRetries) {
+                  try {
+                      gptResponse = await openai.chat.completions.create({
+                          model: "gpt-4.1",  // Using gpt-4.1 as requested
+                          messages: [
+                              {
+                                  role: "system",
+                                  content: "You are an elite UFC fight analyst focused on statistical analysis and technical matchups. Provide pure JSON responses with detailed, evidence-based predictions."
+                              },
+                              {
+                                  role: "user",
+                                  content: simplifiedPrompt
+                              }
+                          ],
+                          max_tokens: 1000,
+                          temperature: 0.7
+                      });
+                      
+                      if (gptResponse?.choices?.[0]?.message?.content) {
+                          break; // Success, exit retry loop
                       }
-                  ],
-                  temperature: 0.7,
-                  max_tokens: 2000,
-                  top_p: 0.9,
-                  frequency_penalty: 0.1,
-                  presence_penalty: 0.1
-              });
+                      
+                      console.log(`GPT returned empty response, retry ${retryCount + 1}/${maxRetries}`);
+                      retryCount++;
+                      
+                      if (retryCount < maxRetries) {
+                          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                      }
+                  } catch (apiError) {
+                      console.error(`GPT API error (attempt ${retryCount + 1}):`, apiError.message);
+                      retryCount++;
+                      
+                      if (retryCount >= maxRetries) {
+                          throw apiError;
+                      }
+                      
+                      await new Promise(resolve => setTimeout(resolve, 2000));
+                  }
+              }
 
-              if (!gptResponse.choices[0]?.message?.content) {
-                  console.error("Empty response from GPT");
-                  throw new Error("Empty response from GPT");
+              if (!gptResponse?.choices?.[0]?.message?.content) {
+                  console.error("Empty response from GPT after all retries");
+                  // Skip this batch and continue with others
+                  continue;
               }
 
               const content = gptResponse.choices[0].message.content;
-              console.log(`GPT Raw Response for batch ${Math.floor(i / maxFightsPerRequest) + 1}:`, content);
+              console.log(`GPT Raw Response for batch ${Math.floor(i / maxFightsPerRequest) + 1} (first 200 chars):`, content.substring(0, 200) + "...");
 
               // Clean and parse the JSON response
-              const cleanedContent = cleanJsonString(content);
-              const batchPredictions = JSON.parse(cleanedContent);
+              let batchPredictions;
+              let parseSuccess = false;
+              
+              // Try multiple parsing strategies
+              const parsingStrategies = [
+                  // Strategy 1: Direct parse after cleaning
+                  () => {
+                      const cleaned = cleanJsonString(content);
+                      return JSON.parse(cleaned);
+                  },
+                  // Strategy 2: Extract JSON with regex and parse
+                  () => {
+                      const jsonMatch = content.match(/\{(?:[^{}]|(?:\{[^{}]*\}))*\}/);
+                      if (!jsonMatch) throw new Error("No JSON found");
+                      return JSON.parse(cleanJsonString(jsonMatch[0]));
+                  },
+                  // Strategy 3: Find JSON between first { and last }
+                  () => {
+                      const firstBrace = content.indexOf('{');
+                      const lastBrace = content.lastIndexOf('}');
+                      if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON brackets found");
+                      const extracted = content.substring(firstBrace, lastBrace + 1);
+                      return JSON.parse(cleanJsonString(extracted));
+                  },
+                  // Strategy 4: Remove everything before first { and after last }
+                  () => {
+                      let trimmed = content.trim();
+                      // Remove any text before the JSON
+                      const jsonStart = trimmed.search(/\{/);
+                      if (jsonStart > 0) {
+                          trimmed = trimmed.substring(jsonStart);
+                      }
+                      // Remove any text after the JSON
+                      const jsonEnd = trimmed.lastIndexOf('}');
+                      if (jsonEnd > 0 && jsonEnd < trimmed.length - 1) {
+                          trimmed = trimmed.substring(0, jsonEnd + 1);
+                      }
+                      return JSON.parse(cleanJsonString(trimmed));
+                  }
+              ];
+              
+              // Try each parsing strategy
+              for (let strategyIndex = 0; strategyIndex < parsingStrategies.length; strategyIndex++) {
+                  try {
+                      console.log(`Trying parsing strategy ${strategyIndex + 1}...`);
+                      batchPredictions = parsingStrategies[strategyIndex]();
+                      parseSuccess = true;
+                      console.log(`Successfully parsed with strategy ${strategyIndex + 1}`);
+                      break;
+                  } catch (strategyError) {
+                      console.log(`Strategy ${strategyIndex + 1} failed:`, strategyError.message);
+                      if (strategyIndex === parsingStrategies.length - 1) {
+                          // All strategies failed
+                          console.error("All parsing strategies failed");
+                          console.error("Raw content:", content);
+                          throw new Error("Invalid JSON response from GPT - all parsing strategies failed");
+                      }
+                  }
+              }
+              
+              if (!parseSuccess) {
+                  throw new Error("Failed to parse GPT response");
+              }
 
               // Validate batch predictions
               if (!validateBatchPredictions(batchPredictions)) {
@@ -826,72 +1074,111 @@ async function generatePredictionsWithGPT(prompt) {
 
 async function generatePredictionsWithClaude(prompt) {
   try {
-      const ClaudeResponse = await anthropic.messages.create({
-          model: "claude-3-5-sonnet-latest",
-          max_tokens: 4000,
-          temperature: 0.7,
-          top_p: 0.9,
-          messages: [
-              {
-                  role: "user",
-                  content: [
+      let ClaudeResponse;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+          try {
+              ClaudeResponse = await anthropic.messages.create({
+                  model: "claude-opus-4-20250514", // Updated model identifier
+                  max_tokens: 4000,
+                  temperature: 0.7,
+                  top_p: 0.9,
+                  messages: [
                       {
-                          type: "text",
-                          text: prompt + "\n\nProvide only valid JSON output with no additional text."
+                          role: "user",
+                          content: [
+                              {
+                                  type: "text",
+                                  text: prompt + "\n\nProvide only valid JSON output with no additional text."
+                              }
+                          ]
                       }
                   ]
+              });
+              
+              // If we get a response, break out of retry loop
+              if (ClaudeResponse?.content) {
+                  break;
               }
-          ]
-      });
+              
+              console.log(`Claude returned empty response, retry ${retryCount + 1}/${maxRetries}`);
+              retryCount++;
+              
+              if (retryCount < maxRetries) {
+                  await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds before retry
+              }
+          } catch (apiError) {
+              console.error(`Claude API error (attempt ${retryCount + 1}):`, apiError.message);
+              
+              // Check if it's a server error (5xx) or overloaded error
+              if (apiError.status >= 500 || apiError.message.includes('Overloaded')) {
+                  retryCount++;
+                  
+                  if (retryCount >= maxRetries) {
+                      console.log("Claude API overloaded after all retries, generating simplified prediction...");
+                      return generateSimplifiedPrediction();
+                  }
+                  
+                  // Wait longer for server errors
+                  const waitTime = retryCount * 3000; // Exponential backoff: 3s, 6s, 9s
+                  console.log(`Waiting ${waitTime/1000} seconds before retry...`);
+                  await new Promise(resolve => setTimeout(resolve, waitTime));
+              } else {
+                  // For non-server errors, throw immediately
+                  throw apiError;
+              }
+          }
+      }
 
-      if (!ClaudeResponse.content || !Array.isArray(ClaudeResponse.content) || ClaudeResponse.content.length === 0) {
-          console.error("Invalid response structure from Claude-3.5:", ClaudeResponse);
-          throw new Error("Invalid response structure from Claude-3.5");
+      if (!ClaudeResponse?.content || !Array.isArray(ClaudeResponse.content) || ClaudeResponse.content.length === 0) {
+          console.error("Invalid response structure from Claude after all retries");
+          return generateSimplifiedPrediction();
       }
 
       const textContent = ClaudeResponse.content.find(item => item.type === "text");
       if (!textContent || !textContent.text) {
-          console.error("No text content found in Claude-3.5 response:", ClaudeResponse);
-          throw new Error("No text content found in Claude-3.5 response");
+          console.error("No text content found in Claude response");
+          return generateSimplifiedPrediction();
       }
 
       // Extract JSON from response
       const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-          console.error("No JSON found in Claude-3.5 response:", textContent.text);
-          throw new Error("No JSON found in Claude-3.5 response");
+          console.error("No JSON found in Claude response");
+          return generateSimplifiedPrediction();
       }
 
       // Clean and parse the JSON
       const cleanJson = cleanJsonString(jsonMatch[0]);
-      console.log("Attempting to parse cleaned JSON:", cleanJson);
+      console.log("Attempting to parse cleaned JSON (first 200 chars):", cleanJson.substring(0, 200) + "...");
 
       try {
           const parsedJson = JSON.parse(cleanJson);
 
           // Validate required structure
           if (!parsedJson.fights || !Array.isArray(parsedJson.fights)) {
-              console.error("Invalid prediction format - parsed JSON:", parsedJson);
-              throw new Error("Invalid prediction format: missing fights array");
+              console.error("Invalid prediction format - missing fights array");
+              return generateSimplifiedPrediction();
           }
 
           // Validate each fight has required fields
           for (const fight of parsedJson.fights) {
               if (!fight.fighter1 || !fight.fighter2 || !fight.predictedWinner) {
-                  console.error("Invalid fight format:", fight);
-                  throw new Error("Invalid fight format: missing required fields");
+                  console.error("Invalid fight format - missing required fields");
+                  return generateSimplifiedPrediction();
               }
           }
 
           return parsedJson;
       } catch (parseError) {
-          console.error("JSON Parse Error - Content:", cleanJson);
-          console.error("Parse error details:", parseError);
-          throw new Error("Failed to parse prediction JSON: " + parseError.message);
+          console.error("JSON Parse Error:", parseError.message);
+          return generateSimplifiedPrediction();
       }
 
   } catch (error) {
-      console.error("Error with Claude-3.5 prediction:", error);
+      console.error("Error with Claude prediction:", error.message);
 
       // Handle rate limits or token limits with fallback
       if (error.message.includes("token limit") || 
@@ -901,19 +1188,13 @@ async function generatePredictionsWithClaude(prompt) {
           return generateSimplifiedPrediction();
       }
 
-      // Handle potential API errors with fallback
-      if (error.status >= 500) {
-          console.log("API error, generating simplified prediction...");
-          return generateSimplifiedPrediction();
-      }
-
       // If it's a parsing error, try to recover with simplified prediction
       if (error.message.includes("JSON")) {
           console.log("JSON parsing error, generating simplified prediction...");
           return generateSimplifiedPrediction();
       }
 
-      throw new Error("Failed to generate Claude-3.5 prediction: " + error.message);
+      throw error;
   }
 }
 
@@ -929,15 +1210,79 @@ function generateSimplifiedPrediction() {
 }
 
 function cleanJsonString(text) {
-  return text
+  // First remove markdown code blocks
+  let cleaned = text
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
       .replace(/[\u201C\u201D]/g, '"')
       .replace(/[\u2018\u2019]/g, "'")
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/,\s*([}\]])/g, "$1")
       .trim();
+
+  // Try to extract JSON using a more robust approach
+  // Look for the outermost JSON object
+  let jsonStart = -1;
+  let jsonEnd = -1;
+  let braceCount = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < cleaned.length; i++) {
+      const char = cleaned[i];
+      
+      if (escapeNext) {
+          escapeNext = false;
+          continue;
+      }
+      
+      if (char === '\\') {
+          escapeNext = true;
+          continue;
+      }
+      
+      if (char === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+      }
+      
+      if (!inString) {
+          if (char === '{') {
+              if (jsonStart === -1) jsonStart = i;
+              braceCount++;
+          } else if (char === '}') {
+              braceCount--;
+              if (braceCount === 0 && jsonStart !== -1) {
+                  jsonEnd = i + 1;
+                  break;
+              }
+          }
+      }
+  }
+
+  if (jsonStart !== -1 && jsonEnd !== -1) {
+      cleaned = cleaned.substring(jsonStart, jsonEnd);
+  } else {
+      // Fallback to simple extraction
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+          cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+      }
+  }
+
+  // Clean up common issues
+  // Remove control characters
+  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, '');
+  
+  // Fix trailing commas
+  cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
+  
+  // Fix missing quotes around property names (carefully)
+  // Only if we detect clear unquoted properties
+  if (/[{,]\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:/.test(cleaned)) {
+      cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+  }
+  
+  return cleaned;
 }
 
 async function comparePhysicalAttributes(fighter1Basics, fighter2Basics) {
@@ -1169,5 +1514,9 @@ module.exports = {
   generatePredictionsWithClaude,
   comparePhysicalAttributes,
   validateBatchPredictions,
-  cleanJsonString
+  cleanJsonString,
+  compareCompetitionLevel,
+  calculateOpponentQuality,
+  calculateLevelDifferential,
+  determineCompetitionAdvantage
 };

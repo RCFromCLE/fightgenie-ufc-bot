@@ -3,18 +3,18 @@ const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('
 class ModelCommand {
     static currentModel = 'gpt';  // Default model
 
-    static async handleModelCommand(message, args) {
+    static async handleModelCommand(interaction, args) {
         try {
             const model = args[0]?.toLowerCase();
 
             if (!['claude', 'gpt'].includes(model)) {
-                await message.reply('Please specify a valid model: `$model claude` or `$model gpt`');
+                await interaction.editReply('Please specify a valid model: `/model claude` or `/model gpt`');
                 return;
             }
 
             this.currentModel = model;
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
-            const modelName = model === 'gpt' ? 'GPT-4o' : 'Claude-3.5';
+            const modelName = model === 'gpt' ? 'GPT' : 'Claude'; // Updated display name
 
             const embed = new EmbedBuilder()
                 .setColor('#0099ff')
@@ -25,10 +25,10 @@ class ModelCommand {
                     value: `Model: ${modelName}\nUse with upcoming fights for predictions.`
                 });
 
-            await message.reply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('Model command error:', error);
-            await message.reply('An error occurred while setting the model.');
+            await interaction.editReply('An error occurred while setting the model.');
         }
     }
 
@@ -36,28 +36,52 @@ class ModelCommand {
         try {
             const [_, model, eventId] = interaction.customId.split('_');
 
-            if (!['Claude-3.5', 'gpt'].includes(model)) {
-                await interaction.reply({
-                    content: 'Invalid model selection.',
-                    ephemeral: true
-                });
+            if (!['Claude', 'gpt'].includes(model)) {
+                // For button interactions that are already deferred, use editReply
+                if (interaction.deferred) {
+                    await interaction.editReply({
+                        content: 'Invalid model selection.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.reply({
+                        content: 'Invalid model selection.',
+                        ephemeral: true
+                    });
+                }
                 return;
             }
 
             this.currentModel = model;
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
-            const modelName = model === 'gpt' ? 'GPT-4o' : 'Claude-3.5';
+            const modelName = model === 'gpt' ? 'GPT' : 'Claude'; // Updated display name
 
-            await interaction.reply({
-                content: `Model switched to ${modelName} ${modelEmoji}`,
-                ephemeral: true
-            });
+            // For button interactions that are already deferred, use editReply
+            if (interaction.deferred) {
+                await interaction.editReply({
+                    content: `Model switched to ${modelName} ${modelEmoji}`,
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({
+                    content: `Model switched to ${modelName} ${modelEmoji}`,
+                    ephemeral: true
+                });
+            }
         } catch (error) {
             console.error('Model interaction error:', error);
-            await interaction.reply({
-                content: 'Error changing model. Please try again.',
-                ephemeral: true
-            });
+            // For button interactions that are already deferred, use editReply
+            if (interaction.deferred) {
+                await interaction.editReply({
+                    content: 'Error changing model. Please try again.',
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({
+                    content: 'Error changing model. Please try again.',
+                    ephemeral: true
+                });
+            }
         }
     }
 

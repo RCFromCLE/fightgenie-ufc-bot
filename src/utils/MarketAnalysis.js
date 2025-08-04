@@ -21,58 +21,144 @@ class MarketAnalysis {
                 return JSON.parse(storedAnalysis[0].analysis_data);
             }
     
-            console.log('Generating new market analysis');
+            console.log('Generating new market analysis using internal calculations...');
     
-            // Get fights data first
+            // Get fights data and odds
             const { mainCardData, prelimData } = await this.getAllFights(event.event_id, model);
-            const oddsData = await OddsAnalysis.fetchUFCOdds();
+            const rawOddsData = await OddsAnalysis.fetchUFCOdds(); // Assuming this returns an array of odds objects
+            
+            // Combine predictions and odds
+            const allFights = [
+                ...(mainCardData?.fights || []), 
+                ...(prelimData?.fights || [])
+            ];
+
+            const enrichedFights = allFights.map(fight => {
+                const fightOdds = rawOddsData?.find(o => 
+                    (o.fighter1.toLowerCase() === fight.fighter1.toLowerCase() && o.fighter2.toLowerCase() === fight.fighter2.toLowerCase()) ||
+                    (o.fighter1.toLowerCase() === fight.fighter2.toLowerCase() && o.fighter2.toLowerCase() === fight.fighter1.toLowerCase())
+                );
+
+                let odds = null;
+                let impliedProbability = null;
+                let edge = null;
+
+                if (fightOdds) {
+                    const winnerOdds = fight.predictedWinner.toLowerCase() === fightOdds.fighter1.toLowerCase() 
+                        ? fightOdds.fighter1_odds 
+                        : fightOdds.fighter2_odds;
+                    
+                    if (winnerOdds) {
+                        odds = winnerOdds;
+                        impliedProbability = winnerOdds > 0 
+                            ? (100 / (winnerOdds + 100)) * 100 
+                            : (Math.abs(winnerOdds) / (Math.abs(winnerOdds) + 100)) * 100;
+                        edge = fight.confidence - impliedProbability;
+                    }
+                }
+
+                return {
+                    ...fight,
+                    odds: odds,
+                    impliedProbability: impliedProbability,
+                    edge: edge
+                };
+            });
+
+            // --- Perform Analysis using Helper Functions ---
+            const marketMetrics = this.calculateMarketMetrics(enrichedFights);
+            const valueOpportunities = this.identifyValueOpportunities(enrichedFights);
+            const parlayAnalysis = await this.analyzeParlayOpportunities(enrichedFights, marketMetrics);
+            const methodProps = await this.analyzeMethodProps(enrichedFights);
+            const riskAssessment = this.generateRiskAssessment(marketMetrics, valueOpportunities);
+            const bankrollStrategy = this.calculateBankrollStrategy(valueOpportunities, parlayAnalysis);
+
+            // --- Construct the Detailed Report ---
+            const analysisReport = {
+                eventDetails: {
+                    name: event.Event,
+                    date: event.Date, // Assuming event object has Date
+                    location: event.Location, // Assuming event object has Location
+                    modelUsed: model
+                },
+                marketOverview: {
+                    totalFightsAnalyzed: marketMetrics.totalFights,
+                    fightsWithOdds: marketMetrics.fightsWithOdds,
+                    averageEdge: this.formatDisplayValue(marketMetrics.averageEdge),
+                    marketBalance: this.formatDisplayValue(marketMetrics.marketBalance),
+                    marketEfficiency: this.formatDisplayValue(marketMetrics.marketEfficiency),
+                    sharpness: marketMetrics.sharpness,
+                    valueOpportunitiesCount: marketMetrics.valueOpportunities
+                },
+                valuePicks: valueOpportunities.map(v => ({
+                    ...v,
+                    edge: this.formatDisplayValue(v.edge),
+                    confidence: this.formatDisplayValue(v.confidence),
+                    impliedProbability: this.formatDisplayValue(v.impliedProbability),
+                    recommendedBetSize: this.formatDisplayValue(v.recommendedBetSize),
+                    valueRatingDisplay: this.getRatingDisplay(v.valueRating)
+                })),
+                parlayRecommendations: {
+                    twoPicks: parlayAnalysis.twoPicks.map(p => ({
+                        fighters: p.picks.map(pick => pick.predictedWinner),
+                        avgConfidence: this.formatDisplayValue(p.confidence),
+                        impliedProbability: this.formatDisplayValue(p.impliedProbability),
+                        potentialReturn: p.potentialReturn,
+                        edge: this.formatDisplayValue(p.edge),
+                        ratingDisplay: this.getRatingDisplay(p.rating)
+                    })),
+                    threePicks: parlayAnalysis.threePicks.map(p => ({
+                        fighters: p.picks.map(pick => pick.predictedWinner),
+                        avgConfidence: this.formatDisplayValue(p.confidence),
+                        impliedProbability: this.formatDisplayValue(p.impliedProbability),
+                        potentialReturn: p.potentialReturn,
+                        edge: this.formatDisplayValue(p.edge),
+                        ratingDisplay: this.getRatingDisplay(p.rating)
+                    })),
+                    valueParlays: parlayAnalysis.valueParlays.map(p => ({
+                        fighters: p.picks.map(pick => pick.predictedWinner),
+                        avgConfidence: this.formatDisplayValue(p.confidence),
+                        impliedProbability: this.formatDisplayValue(p.impliedProbability),
+                        potentialReturn: p.potentialReturn,
+                        edge: this.formatDisplayValue(p.edge),
+                        ratingDisplay: this.getRatingDisplay(p.rating)
+                    })),
+                    overallRiskRating: parlayAnalysis.riskRating // Assuming this is a simple value/string
+                },
+                methodAndPropBets: {
+                    highConfidenceFinishes: methodProps.highConfFinishes.map(f => ({
+                        ...f,
+                        probability: this.formatDisplayValue(f.probability),
+                        confidence: this.formatDisplayValue(f.confidence)
+                    })),
+                    roundProps: methodProps.roundProps.map(r => ({
+                        ...r,
+                        confidence: this.formatDisplayValue(r.confidence)
+                    }))
+                    // specialProps could be added here if implemented
+                },
+                riskAssessment: {
+                    marketRiskLevel: riskAssessment.marketRisk.level,
+                    marketRiskFactors: riskAssessment.marketRisk.factors,
+                    volatility: riskAssessment.volatilityAssessment.marketEfficiency, // Simplified for now
+                    recommendedAdjustments: riskAssessment.volatilityAssessment.recommendedAdjustments,
+                    exposureLimits: {
+                        maxSingleBet: this.formatDisplayValue(riskAssessment.exposureLimits.maxSingleBet),
+                        maxParlay: this.formatDisplayValue(riskAssessment.exposureLimits.maxParlay),
+                        totalExposure: this.formatDisplayValue(riskAssessment.exposureLimits.totalExposure)
+                    }
+                    // individualRisks could be added for more detail
+                },
+                bankrollStrategy: {
+                    straightBetAllocation: this.formatDisplayValue(bankrollStrategy.straightBets.percentage),
+                    parlayAllocation: this.formatDisplayValue(bankrollStrategy.parlays.percentage),
+                    reserveAllocation: this.formatDisplayValue(bankrollStrategy.reserve),
+                    maxStraightBetSize: this.formatDisplayValue(bankrollStrategy.straightBets.maxBetSize),
+                    maxParlayBetSize: this.formatDisplayValue(bankrollStrategy.parlays.maxBetSize)
+                }
+            };
     
-            // Format data for AI processing 
-            const aiPrompt = `Analyze the UFC betting market and odds for ${event.Event}.
-    
-    Main Card Fights and Predictions:
-    ${JSON.stringify(mainCardData?.fights || [], null, 2)}
-    
-    Prelim Card Fights and Predictions:
-    ${JSON.stringify(prelimData?.fights || [], null, 2)}
-    
-    Current Betting Odds:
-    ${JSON.stringify(oddsData || [], null, 2)}
-    
-    Generate a detailed market intelligence report with:
-    1. Market efficiency analysis 
-    2. Best value opportunities 
-    3. Key mismatches between model predictions and market odds
-    4. Parlay recommendations with statistical edge
-    5. Props and method bets that offer value
-    6. Overall betting strategy and bankroll management
-    
-    Provide in JSON format:
-    {
-        "marketAnalysis": {
-            "overview": string,
-            "efficiency": number,
-            "mainCardPicks": [{
-                "fighter": string,
-                "edge": number,
-                "confidence": number, 
-                "method": string,
-                "analysis": string
-            }],
-            "prelimPicks": [{similar structure}],
-            "parlayRecommendations": string,
-            "propBets": string,
-            "overallStrategy": string
-        }
-    }`;
-    
-            // Get AI analysis using same method as llmhelper
-            const aiAnalysis = await generateEnhancedPredictionsWithAI(aiPrompt, event, model);
-            if (!aiAnalysis) {
-                throw new Error('Failed to generate AI analysis');
-            }
-    
-            // Store in database 
+            // Store the new structured analysis in the database
             await database.query(`
                 INSERT INTO market_analysis (
                     event_id,
@@ -82,10 +168,10 @@ class MarketAnalysis {
             `, [
                 event.event_id,
                 model,
-                JSON.stringify(aiAnalysis)
+                JSON.stringify(analysisReport) // Store the new object
             ]);
     
-            return aiAnalysis;
+            return analysisReport; // Return the new object
     
         } catch (error) {
             console.error('Error generating market analysis:', error);

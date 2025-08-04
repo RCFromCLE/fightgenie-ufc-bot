@@ -71,7 +71,7 @@ class TweetAutomation {
                 };
 
                 const historyCompletion = await this.openai.chat.completions.create({
-                    model: "chatgpt-4o-latest",
+                    model: "chatGPT-latest",
                     messages: [historyPrompt],
                     temperature: 0.9
                 });
@@ -128,44 +128,9 @@ class TweetAutomation {
                 output += '❌ No model stats available\n\n';
             }
 
-            // Event Promo Codes
-            console.log('🎫 Generating Event Promo Codes...');
-            if (upcomingEvent) {
-                const promoCodes = await database.query(`
-                    SELECT code 
-                    FROM promo_codes 
-                    WHERE current_uses = 0 
-                    LIMIT 3
-                `);
-
-                if (promoCodes?.length) {
-                    output += '🎫 EVENT PROMO CODES:\n';
-                    for (let i = 0; i < promoCodes.length; i++) {
-                        const promoTweet = `🎯 Fight Genie ${upcomingEvent.Event} - FREE ACCESS CODE
-    
-    ${promoCodes[i].code}
-    
-    To redeem:
-
-    1. Add our bot to your Discord server (link in bio)
-    2. Type $promo "${promoCodes[i].code}"
-    3. Follow @FightGenie & tweet us 🤝
-    
-    • Valid for ${upcomingEvent.Event} only
-    • Expires at event completion
-    • AI predictions by GPT-4o & Claude-3.5
-    • First come, first served! 🎉
-    • 1 code per Discord server 
-    
-    https://fightgenie.ai #UFC`;
-                        output += `Promo Code ${i + 1}:\n${promoTweet}\n\n`;
-                    }
-                } else {
-                    output += '❌ No promo codes available\n\n';
-                }
-            } else {
-                output += '❌ No upcoming event available\n\n';
-            }
+            // Event Promo Codes (REMOVED - No longer applicable for free bot)
+            // console.log('🎫 Generating Event Promo Codes...');
+            // output += '🎫 EVENT PROMO CODES: (Removed)\n\n';
 
             // Promo Tweet
             console.log('💫 Generating Promo Tweet...');
@@ -211,22 +176,17 @@ class TweetAutomation {
         }
     }
 
-    async getUpcomingEvent() {
+async getUpcomingEvent() {
         try {
-            const event = await database.query(`
-                SELECT *
-                FROM events
-                WHERE Date >= date('now')
-                AND Event IS NOT NULL
-                ORDER BY Date ASC
-                LIMIT 1
-            `);
+            // Use the static method from DatabaseManager to get the current/upcoming event
+            // This ensures consistency with the rest of the application
+            const event = await database.constructor.getUpcomingEvent();
 
-            if (event?.[0]) {
+            if (event) {
                 // Create a date object and format it properly
-                const eventDate = new Date(event[0].Date); // Assuming PT timezone
+                const eventDate = new Date(event.Date); // Assuming PT timezone
                 return {
-                    ...event[0],
+                    ...event,
                     Date: eventDate.toISOString() // This ensures consistent date handling
                 };
             }
@@ -559,87 +519,82 @@ class TweetAutomation {
         }
     }
 
-
+    // Consolidated function to post model competition/stats tweets using generateTweet
     async postModelStatsTweets() {
         try {
-            console.log('Fetching model stats...');
-            const modelStats = await this.getModelStats();
-
-            if (!modelStats?.length) {
-                console.log('No model stats available');
-                return;
-            }
-
-            console.log('Model stats:', modelStats);
-
-            const gptStats = modelStats.find(s => s.model_used === 'gpt');
-            const claudeStats = modelStats.find(s => s.model_used === 'claude');
-
-            if (!gptStats || !claudeStats) {
-                console.log('Missing stats for one or both models');
-                return;
-            }
-
-            const tweets = [
-                `🤖 Fight Genie Model Showdown!\n\nGPT-4o: ${gptStats.win_rate}% accurate\nClaude-3.5: ${claudeStats.win_rate}% accurate\n\nBoth models analyzed ${gptStats.events_analyzed} events & ${gptStats.fights_predicted} fights! All results tracked publicly. #UFC #AIpredictions`,
-
-                `📊 Method Prediction Accuracy:\n\nGPT-4o: ${gptStats.method_accuracy}%\nClaude-3.5: ${claudeStats.method_accuracy}%\n\nBased on ${gptStats.fights_predicted} verified fight outcomes! Which AI predicts finishes better? #UFCstats`,
-
-                `💫 AI Confidence vs Reality:\n\nGPT-4o confidence: ${gptStats.avg_confidence}%\nClaude-3.5 confidence: ${claudeStats.avg_confidence}%\n\nTracking ${gptStats.events_analyzed} events of predictions! #FightGenie #UFC`
-            ];
-
-            // Log or post tweets
-            if (this.testMode) {
-                await this.logTweet('MODEL COMPARISON THREAD', tweets.join('\n\n'));
-            } else {
-                let lastTweetId;
-                for (const tweet of tweets) {
-                    const response = lastTweetId ?
-                        await this.twitter.v2.reply(tweet, lastTweetId) :
-                        await this.twitter.v2.tweet(tweet);
-                    lastTweetId = response.data.id;
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-
-            console.log('Model comparison tweets generated successfully');
-
-        } catch (error) {
-            console.error('Error posting model stats tweets:', error);
-        }
-    }
-
-    async generateModelComparisonTweet() {
-        try {
+            console.log('Fetching model stats for competition tweet...');
             const stats = await this.getModelStats();
-            console.log('Model Stats:', stats);
 
-            if (!stats?.length) {
-                return "🤖 Fight Genie's models are warming up! Stay tuned for prediction stats.";
+            if (!stats?.length || stats.length < 2) {
+                console.log('Insufficient model stats available for comparison.');
+                return;
             }
 
             const gptStats = stats.find(s => s.model_used === 'gpt');
             const claudeStats = stats.find(s => s.model_used === 'claude');
 
-            if (gptStats && claudeStats) {
-                return `🤖 MODEL BATTLE REPORT
-
-GPT-4o: Won ${gptStats.fights_won}/${gptStats.fights_predicted} fights (${gptStats.win_rate}%)
-Claude-3.5: Won ${claudeStats.fights_won}/${claudeStats.fights_predicted} fights (${claudeStats.win_rate}%)
-
-🔒 Lock Picks (70%+ confidence hits):
-GPT-4o: ${gptStats.lock_wins}/${gptStats.total_locks} (${gptStats.lock_rate}%)
-Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.lock_rate}%)
-
-📊 ${gptStats.events_analyzed} events analyzed! Join us at https://fightgenie.ai #UFC`;
+            if (!gptStats || !claudeStats) {
+                console.log('Missing stats for one or both models.');
+                return;
             }
 
-            return "🤖 Fight Genie models analyzing fights! Stats coming soon.";
+            // Generate the thread content using the standardized prompt
+            const threadContent = await this.generateTweet({
+                gpt: gptStats,
+                claude: claudeStats
+            }, 'model_competition');
+
+            if (!threadContent) {
+                console.error('Failed to generate model competition tweet content.');
+                return;
+            }
+
+            // Split the content, filter empty/placeholder tweets, and limit thread length
+            const MAX_THREAD_TWEETS = 3; // Limit threads to 3 tweets max
+            const tweets = threadContent.split('\n\n')
+                .map(tweet => tweet.trim()) // Trim whitespace first
+                .filter(tweet => tweet && tweet !== '---') // Remove empty and "---" tweets
+                .slice(0, MAX_THREAD_TWEETS); // Limit to max number
+
+            if (tweets.length === 0) {
+                console.error('No valid tweets generated for model competition after filtering.');
+                return;
+            }
+
+            // Log or post tweets
+            if (this.testMode) {
+                console.log('\n=== MODEL COMPETITION THREAD (Test Mode) ===\n');
+                tweets.forEach((tweet, i) => console.log(`Tweet ${i + 1}:\n${tweet}\n`));
+                await this.logTweet('MODEL COMPETITION', null, threadContent); // Log without event ID
+            } else {
+                console.log('Posting model competition thread...');
+                let lastTweetId;
+                for (const tweet of tweets) {
+                    try {
+                        const response = lastTweetId ?
+                            await this.twitter.v2.reply(tweet.slice(0, 4000), lastTweetId) :
+                            await this.twitter.v2.tweet(tweet.slice(0, 4000));
+                        lastTweetId = response.data.id;
+                        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait between tweets
+                    } catch (error) {
+                        console.error('Error posting individual model competition tweet:', error);
+                        if (error.data) console.error('Twitter API Error:', error.data);
+                        // Decide if we should stop or continue posting the rest of the thread
+                        break; // Stop posting on error
+                    }
+                }
+                if (lastTweetId) { // Only log if at least one tweet was posted successfully
+                   await this.logTweet('MODEL COMPETITION', null, threadContent);
+                   console.log('Model competition thread posted successfully.');
+                }
+            }
+
         } catch (error) {
-            console.error('Error generating comparison tweet:', error);
-            return "🤖 Models processing fight data! Check back soon.";
+            console.error('Error in postModelStatsTweets:', error);
         }
     }
+
+    // Removed redundant generateModelComparisonTweet function
 
     async scrapeEventResults(eventLink) {
         try {
@@ -695,33 +650,34 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
     async generateTweet(data, type) {
         try {
             const completion = await this.openai.chat.completions.create({
-                model: "chatgpt-4o-latest",
+                model: "chatGPT-latest",
                 messages: [{
                     role: "system",
-                    content: `You are Fight Genie, an AI-powered UFC fight prediction bot that is a Discord bot.
-                        Never start tweets with numbers like "1/" or "1/1" or any variation.
-                        Begin tweets naturally with the content itself.
-                        Each tweet should be complete and self-contained.
-                        Include relevant emojis and hashtags.
-                        Keep a single tweet under 450 characters, air on the side of brevity, use bullets and emojis, and make things easily understandable.
-                        When referring to Claude, use Claude-3.5.
-                        When referring to GPT-4, use GPT-4o.
-                        Never use artificial separators or tweet numbering.
-                        Do not be overly wordy or verbose, try to sound like a human.
-                        Be engaging and informative for MMA fans age 18-45.`
+                    content: `You are Fight Genie, an AI-powered UFC fight prediction bot. Your SOLE task is to generate tweet content based *only* on the user prompt.
+                        **CRITICAL RULES:**
+                        - Output ONLY the raw tweet text. NO explanations, NO apologies, NO meta-commentary, NO numbering (like "1.", "Tweet 1:"), NO questions, NO requests for clarification.
+                        - NEVER include placeholders like "ireeelvanaace" or similar.
+                        - NEVER output separators like "---" or similar markers between tweets. Use standard paragraph breaks (\n\n) if generating multiple tweets for a thread.
+                        - Adhere STRICTLY to the format requested in the user prompt (e.g., number of tweets for a thread).
+                        - Sound like a knowledgeable, engaging, but concise human MMA analyst for fans aged 18-45.
+                        - Use relevant emojis and hashtags naturally within the tweet text.
+                        - Keep individual tweets under 450 characters. Prioritize brevity and clarity. Use bullet points where appropriate.
+                        - When referring to models, use "GPT" and "Claude".
+                        - Always include relevant hashtags like #UFC, #MMA, #FightGenie, plus any event-specific ones requested.
+                        - Ensure the generated text is ready to be posted directly to Twitter without any modification.`
                 },
                 {
                     role: "user",
                     content: await this.createPrompt(data, type)
                 }],
-                max_tokens: 1500,
+                max_tokens: 1500, // Adjusted for potentially slightly longer, better-formatted tweets
                 temperature: 0.7,
-                presence_penalty: 0.6,
-                frequency_penalty: 0.3
+                presence_penalty: 0.4, // Slightly reduced penalty
+                frequency_penalty: 0.2  // Slightly reduced penalty
             });
-    
-            const tweet = completion.choices[0].message.content;
-            return tweet + (this.tweetIdCounter++ % 3 === 0 ? "\n\n🤖 Tweet generated by GPT-4o" : "");
+
+            const tweet = completion.choices[0].message.content.trim(); // Trim whitespace
+            return tweet; // Removed random suffix
         } catch (error) {
             console.error('Error generating tweet:', error);
             return null;
@@ -837,125 +793,93 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
     }
 
     async createPrompt(data, type) {
-        const getRandomFormat = () => Math.floor(Math.random() * 5); // 0-4 format types
+        // Removed getRandomFormat
 
         switch (type) {
             case 'fight_analysis':
-                const format = getRandomFormat();
+                // Standardized fight analysis prompt
                 const baseStats = `
                     Fighter 1 (${data.fight.fighter1}):
-                    - Strikes per min: ${data.fighter1Stats.SLPM}
+                    - Record: ${data.fighter1Stats.Wins}-${data.fighter1Stats.Losses}
+                    - SLpM: ${data.fighter1Stats.SLPM} | Str. Acc: ${data.fighter1Stats.StrAcc}% | Str. Def: ${data.fighter1Stats.StrDef}%
+                    - SApM: ${data.fighter1Stats.SLpM_avg}
+                    - TD Avg: ${data.fighter1Stats.TDAvg} | TD Acc: ${data.fighter1Stats.TDAcc}% | TD Def: ${data.fighter1Stats.TDDef}%
+                    - Sub Avg: ${data.fighter1Stats.SubAvg}
+                    - Height: ${data.fighter1Stats.Height} | Reach: ${data.fighter1Stats.Reach} | Stance: ${data.fighter1Stats.Stance}
+                    - Finish Rate: ${data.fighter1Stats.FinishRate}% | Avg Fight Time: ${data.fighter1Stats.AvgFightTime}
                     - Striking accuracy: ${data.fighter1Stats.StrAcc}%
                     - Strike defense: ${data.fighter1Stats.StrDef}%
-                    - Strikes absorbed per min: ${data.fighter1Stats.SLpM_avg}
-                    - Takedowns per 15m: ${data.fighter1Stats.TDAvg}
-                    - Takedown accuracy: ${data.fighter1Stats.TDAcc}%
-                    - Takedown defense: ${data.fighter1Stats.TDDef}%
-                    - Submission attempts per 15m: ${data.fighter1Stats.SubAvg}
-                    - Height: ${data.fighter1Stats.Height}
-                    - Reach: ${data.fighter1Stats.Reach}
-                    - Stance: ${data.fighter1Stats.Stance}
-                    - Win/Loss: ${data.fighter1Stats.Wins}-${data.fighter1Stats.Losses}
-                    - Win methods: KO (${data.fighter1Stats.KO}), SUB (${data.fighter1Stats.SUB}), DEC (${data.fighter1Stats.DEC})
-                    - Finish rate: ${data.fighter1Stats.FinishRate}%
-                    - Average fight time: ${data.fighter1Stats.AvgFightTime}
-                    - Career significant strikes: ${data.fighter1Stats.TotalStrikes}
-                    - Career takedowns: ${data.fighter1Stats.TotalTD}
     
                     Fighter 2 (${data.fight.fighter2}):
-                    - Strikes per min: ${data.fighter2Stats.SLPM}
-                    - Striking accuracy: ${data.fighter2Stats.StrAcc}%
-                    - Strike defense: ${data.fighter2Stats.StrDef}%
-                    - Strikes absorbed per min: ${data.fighter2Stats.SLpM_avg}
-                    - Takedowns per 15m: ${data.fighter2Stats.TDAvg}
-                    - Takedown accuracy: ${data.fighter2Stats.TDAcc}%
-                    - Takedown defense: ${data.fighter2Stats.TDDef}%
-                    - Submission attempts per 15m: ${data.fighter2Stats.SubAvg}
-                    - Height: ${data.fighter2Stats.Height}
-                    - Reach: ${data.fighter2Stats.Reach}
-                    - Stance: ${data.fighter2Stats.Stance}
-                    - Win/Loss: ${data.fighter2Stats.Wins}-${data.fighter2Stats.Losses}
-                    - Win methods: KO (${data.fighter2Stats.KO}), SUB (${data.fighter2Stats.SUB}), DEC (${data.fighter2Stats.DEC})
-                    - Finish rate: ${data.fighter2Stats.FinishRate}%
-                    - Average fight time: ${data.fighter2Stats.AvgFightTime}
-                    - Career significant strikes: ${data.fighter2Stats.TotalStrikes}
-                    - Career takedowns: ${data.fighter2Stats.TotalTD}`;
+                    - Record: ${data.fighter2Stats.Wins}-${data.fighter2Stats.Losses}
+                    - SLpM: ${data.fighter2Stats.SLPM} | Str. Acc: ${data.fighter2Stats.StrAcc}% | Str. Def: ${data.fighter2Stats.StrDef}%
+                    - SApM: ${data.fighter2Stats.SLpM_avg}
+                    - TD Avg: ${data.fighter2Stats.TDAvg} | TD Acc: ${data.fighter2Stats.TDAcc}% | TD Def: ${data.fighter2Stats.TDDef}%
+                    - Sub Avg: ${data.fighter2Stats.SubAvg}
+                    - Height: ${data.fighter2Stats.Height} | Reach: ${data.fighter2Stats.Reach} | Stance: ${data.fighter2Stats.Stance}
+                    - Finish Rate: ${data.fighter2Stats.FinishRate}% | Avg Fight Time: ${data.fighter2Stats.AvgFightTime}`;
 
                 const matchupAnalysis = `
-                    Style Matchup Analysis:
-                    - Stance dynamic: ${data.fighter1Stats.Stance} vs ${data.fighter2Stats.Stance}
-                    - Height difference: ${Math.abs(parseFloat(data.fighter1Stats.Height) - parseFloat(data.fighter2Stats.Height))} inches
-                    - Reach advantage: ${Math.abs(parseFloat(data.fighter1Stats.Reach) - parseFloat(data.fighter2Stats.Reach))} inches
-                    - Combined finish rate: ${(parseFloat(data.fighter1Stats.FinishRate) + parseFloat(data.fighter2Stats.FinishRate)) / 2}%
-                    - Striking differential: ${Math.abs(parseFloat(data.fighter1Stats.SLPM) - parseFloat(data.fighter2Stats.SLPM))} strikes/min
-                    - Grappling differential: ${Math.abs(parseFloat(data.fighter1Stats.TDAvg) - parseFloat(data.fighter2Stats.TDAvg))} TD/15min
-                    - Experience gap: ${Math.abs(parseInt(data.fighter1Stats.Wins) + parseInt(data.fighter1Stats.Losses) - parseInt(data.fighter2Stats.Wins) - parseInt(data.fighter2Stats.Losses))} fights
-                    - Average fight time difference: ${Math.abs(parseFloat(data.fighter1Stats.AvgFightTime) - parseFloat(data.fighter2Stats.AvgFightTime))} minutes`;
+                    Matchup Insights:
+                    - Stance: ${data.fighter1Stats.Stance} vs ${data.fighter2Stats.Stance}
+                    - Reach Adv: ${Math.abs(parseFloat(data.fighter1Stats.Reach) - parseFloat(data.fighter2Stats.Reach))} inches for ${parseFloat(data.fighter1Stats.Reach) > parseFloat(data.fighter2Stats.Reach) ? data.fight.fighter1 : data.fight.fighter2}
+                    - Striking Diff: ${Math.abs(parseFloat(data.fighter1Stats.SLPM) - parseFloat(data.fighter2Stats.SLPM)).toFixed(1)} SLpM
+                    - Grappling Diff: ${Math.abs(parseFloat(data.fighter1Stats.TDAvg) - parseFloat(data.fighter2Stats.TDAvg)).toFixed(1)} TD/15min`;
 
-                // Different format templates
-                const formats = {
-                    0: `Create a detailed tweet thread (1 tweet, thread for each item mentioned) breakdown of ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
-                        ${baseStats}
-                        ${matchupAnalysis}
-    
-                        Tale of the tape & career achievements
-                        Striking analysis & statistical edges
-                        Grappling comparison & ground game
-                        Style matchup & tactical breakdown
-                        Prediction with confidence explanation`,
+                // Standardized format
+                const fightAnalysisPrompt = `Generate a concise 3-tweet thread analyzing ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
 
-                    1: `Create a technical 3-tweet analysis of ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
-                        ${baseStats}
-                        ${matchupAnalysis}
-    
-                        Complete statistical comparison
-                        Career patterns & tendencies
-                        Style matchup & key advantages
-                        AI prediction with detailed reasoning`,
+Tweet 1: Tale of the Tape & Key Stats
+- Include records, key striking/grappling stats (SLpM, TD Avg), and physicals (Height, Reach, Stance) for both fighters using the provided base stats.
+${baseStats}
 
-                    2: `Create a narrative 3-tweet story about ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
-                        ${baseStats}
-                        ${matchupAnalysis}
-    
-                        Fighter journeys & career highlights
-                        Style clash & key battlegrounds
-                        Analytics-based prediction & method`,
+Tweet 2: Matchup Dynamics & AI Factors
+- Discuss the style matchup (Stance, Reach, Striking/Grappling differentials) using the provided matchup insights.
+- List the key factors the AI considered: ${data.fight.keyFactors.join(', ')}.
+${matchupAnalysis}
 
-                    3: `Create a deep-dive 3-tweet thread analyzing ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
-                        ${baseStats}
-                        ${matchupAnalysis}
-    
-                        Fighter backgrounds & experience
-                        Striking statistics & standup game
-                        Grappling metrics & ground skills
-                        Physical advantages & disadvantages
-                        Style matchup & strategic factors
-                        AI prediction with confidence breakdown`,
+Tweet 3: AI Prediction & Reasoning
+- State the predicted winner: ${data.fight.predictedWinner}
+- Confidence: ${data.fight.confidence}%
+- Predicted Method: ${data.fight.method}
+- Briefly summarize the AI's reasoning: ${data.fight.reasoning}
+- Include a call to action: "Get full predictions in our Discord (link in bio!)"
 
-                    4: `Create a statistical 4-tweet analysis of ${data.fight.fighter1} vs ${data.fight.fighter2} for ${data.event.Event}.
-                        ${baseStats}
-                        ${matchupAnalysis}
-    
-                        Career statistics & achievements
-                        Performance metrics comparison
-                        Win percentages & method breakdown
-                        Data-driven prediction & reasoning`
-                };
+Instructions:
+- Use bullet points for stats.
+- Keep each tweet focused and under the character limit.
+- Use emojis relevantly (🥊📊🧠).
+- Include #UFC #${data.event.Event.replace(/[^a-zA-Z0-9]/g, '')} #FightGenie hashtags.`;
 
-                return formats[format] + `\n\nAI Analysis Factors:\n${data.fight.keyFactors.join('\n')}\nPredicted winner: ${data.fight.predictedWinner} (${data.fight.confidence}% confidence)\nMethod: ${data.fight.method}\nDetailed reasoning: ${data.fight.reasoning}\n\nInclude relevant emojis and #UFC #FightGenie hashtags.`;
+                return fightAnalysisPrompt;
 
             case 'value_pick':
-                const valueFormat = getRandomFormat();
-                const valueFormats = {
-                    0: `Create a brief value pick breakdown for ${data.predictedWinner} (Statistical Focus), be sure to show the pick in an easily identifiable way.`,
-                    1: `Create a brief high-confidence analysis for ${data.predictedWinner} (Career Trends Focus), be sure to show the pick in an easily identifiable way.`,
-                    2: `Create a brief betting insight thread for ${data.predictedWinner} (Style Matchup Focus), be sure to show the pick in an easily identifiable way.`,
-                    3: `Create a brief pick analysis for ${data.predictedWinner} (Technical Focus), be sure to show the pick in an easily identifiable way and include a prediction.`,
-                    4: `Create a brief prediction thread for ${data.predictedWinner} (Historical Focus), be sure to show the pick in an easily identifiable way and include a prediction.`
-                };
+                // Standardized value pick prompt
+                const valuePickPrompt = `Create a single, compelling tweet highlighting a high-confidence value pick: ${data.predictedWinner} vs ${data.fighter1 === data.predictedWinner ? data.fighter2 : data.fighter1}.
 
-                return `${valueFormats[valueFormat]}
-    
+Pick Details:
+- Fighter: ${data.predictedWinner}
+- Confidence: ${data.confidence}%
+- Predicted Method: ${data.method}
+
+Key Stats for ${data.predictedWinner}:
+- Record: ${data.fighterStats.Wins}-${data.fighterStats.Losses}
+- SLpM: ${data.fighterStats.SLPM} | Str. Acc: ${data.fighterStats.StrAcc}% | TD Avg: ${data.fighterStats.TDAvg}
+- Finish Rate: ${data.fighterStats.FinishRate}%
+
+AI Reasoning Snippet: ${data.reasoning.substring(0, 100)}... (Summarize key advantage)
+
+Instructions:
+- Start with a hook like "🎯 Fight Genie Value Pick!" or "🔥 High-Confidence Alert!".
+- Clearly state the pick, opponent, and confidence level.
+- Include 1-2 key stats supporting the pick.
+- Briefly mention the AI's core reasoning (e.g., "AI highlights striking edge" or "Grappling advantage is key").
+- Add a call to action: "Full analysis in our Discord! Link in bio."
+- Use emojis (🎯💰📈).
+- Include #UFC #FightPick #FightGenie hashtags.`;
+
+                return valuePickPrompt;
+/*
                     Complete Fighter Stats:
                     - Strikes per min: ${data.fighterStats.SLPM}
                     - Striking accuracy: ${data.fighterStats.StrAcc}%
@@ -969,64 +893,80 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
                     - Finish rate: ${data.fighterStats.FinishRate}%
                     - Average fight time: ${data.fighterStats.AvgFightTime}
                     - Win methods: KO (${data.fighterStats.KO}), SUB (${data.fighterStats.SUB}), DEC (${data.fighterStats.DEC})
-                    
+
                     Prediction Details:
                     - Confidence: ${data.confidence}%
                     - Predicted method: ${data.method}
                     - Key edges: ${data.keyAdvantages || 'To be analyzed'}
                     - Statistical advantages: ${data.statEdges || 'To be analyzed'}
-                    
+
                     Create a thread that emphasizes technical analysis and statistical evidence.
                     Be brief but informative.
-                    Include https://fightgenie.ai and relevant hashtags.`;
-
+                    Include https://fightgenie.ai and relevant hashtags.
+*/
             case 'model_competition':
-                return `Create 3 focused tweets comparing GPT-4 and Claude's performance:
+                // Completely revised prompt for more natural, conversational model comparison tweets
+                return `Create a single, engaging tweet that shares insights about our AI models' performance in predicting UFC fights. Instead of just listing stats, craft a narrative that feels like an MMA analyst discussing interesting trends.
+
+                    Available Stats (use selectively, don't include all):
+                    GPT:
+                    - Overall Win Rate: ${data.gpt.win_rate}% (${data.gpt.won_fights}/${data.gpt.total_fights})
+                    - Lock Pick Rate (>=75% Confidence): ${data.gpt.lock_rate}% (${data.gpt.lock_wins}/${data.gpt.total_locks})
+                    - Total Fights Analyzed: ${data.gpt.total_fights}
+                    - Events Analyzed: ${data.gpt.events_analyzed}
+    
+                    Claude:
+                    - Overall Win Rate: ${data.claude.win_rate}% (${data.claude.won_fights}/${data.claude.total_fights})
+                    - Lock Pick Rate (>=75% Confidence): ${data.claude.lock_rate}% (${data.claude.lock_wins}/${data.claude.total_locks})
+                    - Total Fights Analyzed: ${data.claude.total_fights}
+                    - Events Analyzed: ${data.claude.events_analyzed}
+    
+                    Approach:
+                    - Focus on a specific insight or trend (e.g., "Claude excels at predicting underdogs" or "GPT has been on fire lately with submission predictions")
+                    - Frame it as an interesting observation rather than a statistical report
+                    - Mention only 1-2 key stats that support your narrative
+                    - Add a thought-provoking question or prediction about future performance
+                    - Include a subtle call to action about joining Discord (nothing too promotional)
                     
-                            Stats to work with:
-                            GPT-4o:
-                            - Win rate: ${data.gpt.win_rate}%
-                            - Total predictions: ${data.gpt.fights_predicted}
-                            - Lock rate (70%+ confidence hits): ${data.gpt.lock_rate}% (${data.gpt.lock_wins}/${data.gpt.total_locks})
-                            - Events analyzed: ${data.gpt.events_analyzed}
+                    Style Guidelines:
+                    - Write like an experienced MMA analyst sharing an interesting observation
+                    - Use natural language that flows conversationally
+                    - Avoid robotic phrasing like "GPT scored a solid 61.5% (8/13)"
+                    - Use 1-2 relevant emojis naturally within the text
+                    - Include #UFC #FightGenie hashtags
                     
-                            Claude-3.5:
-                            - Win rate: ${data.claude.win_rate}%
-                            - Total predictions: ${data.claude.fights_predicted}
-                            - Lock rate (70%+ confidence hits): ${data.claude.lock_rate}% (${data.claude.lock_wins}/${data.claude.total_locks})
-                            - Events analyzed: ${data.claude.events_analyzed}
-                    
-                            Focus only on win rates head-to-head comparison
-                            Focus only on lock rates (high confidence picks at 70%+)
-                            Overall statistical summary of both metrics together
-                    
-                            Keep tone engaging but factual while maintaining brevity. Include total fights/events analyzed.
-                            Use emojis 🤖🎯📊 etc.
-                            Include #UFC #FightGenie hashtags.
-                            Do not mention prediction methods or types.`;
+                    Example Approach (create your own, don't copy this):
+                    "Interesting trend in our AI predictions: Claude's been crushing it with underdog picks lately, hitting 72% when going against the odds. Meanwhile, GPT dominates main event calls. The AI rivalry continues! Who's your pick for best predictor? #UFC #FightGenie"`;
 
 
             case 'ufc_history':
-                const historyFormat = getRandomFormat();
-                const historyFormats = {
-                    0: "Create an epic storytelling tweet connecting UFC history to today",
-                    1: "Create a 'path to greatness' style tweet linking past to present",
-                    2: "Create a 'records and milestones' focused historical parallel",
-                    3: "Create a 'full circle' narrative connecting past champions to current challengers",
-                    4: "Create a 'defining moments' tweet linking historical significance to upcoming potential"
-                };
+                 // Standardized UFC History Prompt (Removed random format)
+                const historyPrompt = `Create an engaging tweet connecting a historical UFC fact to the upcoming event, ${data.event.Event}.
 
-                return `${historyFormats[historyFormat]}
-                    
+Historical Fact: ${data.historical.fact}
+
+Upcoming Event: ${data.event.Event} on ${new Date(data.event.Date).toLocaleDateString()}
+
+Instructions:
+1. Start with the historical fact, making it intriguing.
+2. Draw a clear parallel or connection to the upcoming event (${data.event.Event}). This could be thematic, stylistic, related to stakes, weight class, etc.
+3. Build anticipation for potential new history being made at ${data.event.Event}.
+4. Keep it concise and impactful for Twitter.
+5. Use relevant emojis (⏳📜🥊).
+6. Include #UFC #MMAHistory #FightGenie and the event hashtag (e.g., #${data.event.Event.replace(/[^a-zA-Z0-9]/g, '')}).
+7. End with: "🤖 Get AI predictions for ${data.event.Event} in our Discord! Link in bio."`;
+
+                return historyPrompt;
+/*
                                     Historical Context:
                                     ${data.historical.fact}
-                                    
+
                                     Upcoming Event:
                                     Event: ${data.event.Event}
                                     Date: ${new Date(data.event.Date).toLocaleDateString()}
-                                    
-                                    You are Fight Genie, an AI Powered Discord bot who's sole purpose is to pick UFC fights and share interesting facts from the UFC history on Twitter/X. 
-                                    
+
+                                    You are Fight Genie, an AI Powered Discord bot who's sole purpose is to pick UFC fights and share interesting facts from the UFC history on Twitter/X.
+
                                     Create a tweet that:
 
                                     1. Connects this historical moment to the upcoming fights
@@ -1034,47 +974,60 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
                                     3. Appeals to both casual and hardcore fans
                                     4. Uses vivid fight imagery and stats, but don't be too corny
                                     5. Encourages interaction with our bot
-                                    
+
                                     Tweet must:
                                     • Include event hashtag and #FightGenie
-                                    • End with a version of "🤖 Add Fight Genie to your Discord server today & use $buy for AI powered predictions for your entire community"
+                                    • End with: "🤖 Add Fight Genie to your Discord (link in bio)! It's FREE! Use $donate to support us." // Updated CTA
                                     • Use appropriate emojis
-                                    • Be engaging for both new and longtime fans`;
-
+                                    • Be engaging for both new and longtime fans
+*/
 
             case 'promo':
-                const promoFormat = getRandomFormat();
-                const promoFormats = {
-                    0: "Create a feature-focused promotional thread",
-                    1: "Create a statistical proof promotional thread",
-                    2: "Create a user-benefit focused promotional thread",
-                    3: "Create a technical capability promotional thread",
-                    4: "Create an event-specific promotional thread"
-                };
+                 // Standardized Promo Prompt (Removed random format)
+                const promoPrompt = `Create an engaging promotional tweet for Fight Genie focused on the upcoming event: ${data.event.Event}.
 
-                return `${promoFormats[promoFormat]}
+Key Selling Points:
+- Dual AI Predictions: GPT & Claude analyze every fight.
+- Proven Accuracy: Track our model performance publicly.
+- In-Depth Analysis: Stats, style breakdowns, method predictions.
+- Discord Integration: Get picks directly in your server.
+- Website: https://fightgenie.ai
+
+Instructions:
+1. Start with a hook related to ${data.event.Event}.
+2. Highlight 1-2 key features (e.g., Dual AI, accuracy).
+3. Mention the benefit for users (e.g., "Get an edge", "Impress your friends").
+4. Include a strong call to action: "Add Fight Genie to your Discord! Link in bio."
+5. Use relevant emojis (🤖📈🥊).
+6. Include #UFC #${data.event.Event.replace(/[^a-zA-Z0-9]/g, '')} #AI #FightPicks #FightGenie hashtags.`;
+
+                return promoPrompt;
+/*
                     Key Features:
-                    - Dual AI system (GPT-4o & Claude-3.5)
+                    - Dual AI system (GPT & Claude)
                     - High Lock Rate (70%+ success)
-                    - Fun social experiment: Claude-3.5 vs GPT-4o
+                    - Fun social experiment: Claude vs GPT
                     - Access to historical predictions
                     - Custom fight analysis
                     - Detailed statistical and style breakdowns
                     - Method predictions
                     - Value picks
                     - Performance tracking
-    
+
                     Event: ${data.event.Event}
                     Website: https://fightgenie.ai
 
-                    Add Fight Genie to your Discord server today (link in bio)!
-    
-                    Create an engaging promotional thread that emphasizes technical excellence and analytical capabilities.
-                    Include relevant hashtags #UFC #AI #FightPicks`;
+                    Add Fight Genie to your Discord server today (link in bio)! It's FREE! Use $donate to support us. // Updated CTA
 
+                    Create an engaging promotional thread that emphasizes technical excellence and analytical capabilities.
+                    Include relevant hashtags #UFC #AI #FightPicks
+*/
             default:
-                return `Create an engaging thread about Fight Genie's AI predictions.
-                        Mention we have Claude-3.5 and GPT-4o models predicting current UFC event, and we do this all within your Discord server if you invite our bot today, performance tracking, and website https://fightgenie.ai`;
+                 // Default fallback prompt
+                return `Create an engaging tweet about Fight Genie's AI-powered UFC predictions.
+                        Mention our dual AI system (GPT & Claude), Discord bot integration, and performance tracking.
+                        Website: https://fightgenie.ai
+                        Include #UFC #AI #FightGenie hashtags.`;
         }
     }
 
@@ -1098,11 +1051,20 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             // Generate the entire thread content using generateTweet
             const threadContent = await this.generateTweet(analysis, 'fight_analysis');
             
-            // Split the content into individual tweets
-            const tweets = threadContent.split('\n\n').filter(tweet => tweet.trim());
+            // Split the content, filter empty/placeholder tweets, and limit thread length
+            const MAX_THREAD_TWEETS = 3; // Limit threads to 3 tweets max (as requested by the prompt)
+            const tweets = threadContent.split('\n\n')
+                .map(tweet => tweet.trim()) // Trim whitespace first
+                .filter(tweet => tweet && tweet !== '---') // Remove empty and "---" tweets
+                .slice(0, MAX_THREAD_TWEETS); // Limit to max number
+
+            if (tweets.length === 0) {
+                 console.error('No valid tweets generated for fight analysis after filtering.');
+                 return;
+            }
     
             if (this.testMode) {
-                // Log tweets in test mode
+                // Log filtered tweets in test mode
                 console.log('\n=== FIGHT ANALYSIS THREAD ===\n');
                 tweets.forEach((tweet, i) => {
                     console.log(`Tweet ${i + 1}:\n${tweet}\n`);
@@ -1143,41 +1105,38 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             }
             throw error;
         }
-    }    async postValuePickTweet() {
+    }
+
+    async postValuePickTweet() {
         const valuePicks = await this.getValuePicks();
         if (valuePicks?.[0]) {
             const tweet = await this.generateTweet(valuePicks[0], 'value_pick');
 
-            if (this.testMode) {
-                await this.logTweet('VALUE PICK', tweet);
-            } else {
-                await this.twitter.v2.tweet(tweet);
+            if (!tweet) {
+                 console.error('Failed to generate value pick tweet content.');
+                 return;
             }
 
-            console.log('Value pick ' + (this.testMode ? 'logged' : 'posted') + ':', tweet);
+            if (this.testMode) {
+                console.log('\n=== VALUE PICK (Test Mode) ===\n', tweet);
+                await this.logTweet('VALUE PICK', null, tweet); // Log without event ID for general picks
+            } else {
+                 try {
+                     console.log('Posting value pick tweet...');
+                     await this.twitter.v2.tweet(tweet.slice(0, 4000));
+                     await this.logTweet('VALUE PICK', null, tweet);
+                     console.log('Value pick tweet posted successfully.');
+                 } catch (error) {
+                     console.error('Error posting value pick tweet:', error);
+                     if (error.data) console.error('Twitter API Error:', error.data);
+                 }
+            }
+        } else {
+             console.log('No value picks available to tweet.');
         }
     }
 
-    async postModelComparisonTweet() {
-        const stats = await this.getModelStats();
-        if (stats?.length >= 2) {
-            const gptStats = stats.find(s => s.model_used === 'gpt');
-            const claudeStats = stats.find(s => s.model_used === 'claude');
-
-            const tweet = await this.generateTweet({
-                gpt: gptStats,
-                claude: claudeStats
-            }, 'model_competition');
-
-            if (this.testMode) {
-                await this.logTweet('MODEL COMPARISON', tweet);
-            } else {
-                await this.twitter.v2.tweet(tweet);
-            }
-
-            console.log('Model comparison ' + (this.testMode ? 'logged' : 'posted') + ':', tweet);
-        }
-    }
+    // Removed redundant postModelComparisonTweet function
 
     async getMethodStats() {
         try {
@@ -1226,80 +1185,7 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
         }
     }
 
-    async scheduleEventPromoTweets(event) {
-        try {
-            const promoCodes = await database.query(`
-                SELECT code 
-                FROM promo_codes 
-                WHERE current_uses = 0 
-                LIMIT 3
-            `);
-
-            if (!promoCodes?.length) {
-                console.log('❌ No available promo codes. Generate more using $createnewcodes');
-                await this.logTweet('PROMO CODES', 'No available promo codes found');
-                return;
-            }
-
-            const currentEvent = await this.getUpcomingEvent();
-            if (!currentEvent) {
-                console.log('❌ No upcoming event found');
-                return;
-            }
-
-            const eventDate = new Date(currentEvent.Date);
-            const expirationDate = new Date(eventDate);
-            expirationDate.setDate(expirationDate.getDate() + 1);
-            expirationDate.setHours(1, 30, 0, 0);
-
-            const startHour = 12; // Start at noon
-            const endHour = 22;   // End at 10 PM
-
-            for (let i = 0; i < Math.min(promoCodes.length, 3); i++) {
-                const hour = Math.floor(Math.random() * (endHour - startHour)) + startHour;
-                const minute = Math.floor(Math.random() * 60);
-                const tweetTime = new Date(eventDate);
-                tweetTime.setHours(hour, minute);
-
-                const promoTweet = `🎯 Fight Genie ${currentEvent.Event} Free Access Code Alert!
-    
-    ${promoCodes[i].code}
-    
-    To redeem:
-    1. Add our bot to your server (link in bio)
-    2. Type $promo "${promoCodes[i].code}"
-    3. Follow @FightGenie & @ us something nice 🤝.
-    
-    • First Come, First Served. One use per code. One code per Discord server. 
-    • Valid for ${currentEvent.Event} only
-    • Expires at event completion
-    • AI predictions by GPT-4o & Claude-3.5
-    
-    https://fightgenie.ai #UFC #FightGenie`;
-
-                const j = schedule.scheduleJob(tweetTime, async () => {
-                    console.log(`Executing promo code tweet for code: ${promoCodes[i].code}`);
-
-                    if (this.testMode) {
-                        await this.logTweet('PROMO CODE', promoTweet);
-                    } else {
-                        await this.twitter.v2.tweet(promoTweet);
-                        await database.query(`
-                            UPDATE promo_codes 
-                            SET current_uses = 1 
-                            WHERE code = ?
-                        `, [promoCodes[i].code]);
-                    }
-                });
-
-                console.log(`Scheduled promo code tweet for ${tweetTime.toLocaleString()}`);
-            }
-
-        } catch (error) {
-            console.error('Error scheduling promo code tweets:', error);
-        }
-    }
-
+    // Removed scheduleEventPromoTweets function as promo codes are no longer used
 
     async getFightPredictionStats() {
         try {
@@ -1325,67 +1211,8 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
         }
     }
 
-    async postModelStatsTweets() {
-        try {
-            // Get all stats
-            const [baseStats, methodStats, predictionStats] = await Promise.all([
-                this.getModelStats(),
-                this.getMethodStats(),
-                this.getFightPredictionStats()
-            ]);
-
-            if (!baseStats?.length) return;
-
-            // Generate multiple tweets about different aspects
-            const tweets = [];
-
-            // Overall performance tweet
-            const overallTweet = `🤖 Fight Genie Performance Update:
-    GPT-4o (${baseStats.find(s => s.model_used === 'gpt')?.win_rate}% accurate) vs
-    Claude-3.5 (${baseStats.find(s => s.model_used === 'claude')?.win_rate}% accurate)
-    ${predictionStats[0].events_analyzed} events analyzed! #UFC #AI`;
-            tweets.push(overallTweet);
-
-            // Method breakdown tweet
-            if (methodStats) {
-                const gptMethods = methodStats['gpt'];
-                const methodTweet = `📊 Method Prediction Accuracy:
-    KO/TKO: GPT-4o ${(gptMethods.ko_tko.correct / gptMethods.ko_tko.total * 100).toFixed(1)}%
-    Submissions: ${(gptMethods.submission.correct / gptMethods.submission.total * 100).toFixed(1)}%
-    Decisions: ${(gptMethods.decision.correct / gptMethods.decision.total * 100).toFixed(1)}%
-    🎯 Most accurate at predicting ${this.getMostAccurateMethod(gptMethods)}! #UFCStats`;
-                tweets.push(methodTweet);
-            }
-
-            // Detailed prediction analysis
-            if (predictionStats?.length) {
-                const gptStats = predictionStats.find(s => s.model_used === 'gpt');
-                const predictionTweet = `💫 Fight Prediction Insights:
-    ${gptStats.total_predictions} fights analyzed
-    Main Card: ${((gptStats.main_card_predictions / gptStats.total_predictions) * 100).toFixed(1)}% accurate
-    Prelims: ${((gptStats.prelim_predictions / gptStats.total_predictions) * 100).toFixed(1)}% accurate
-    Average Confidence: ${gptStats.avg_confidence.toFixed(1)}% #UFCPredictions`;
-                tweets.push(predictionTweet);
-            }
-
-            // Post tweets
-            if (this.testMode) {
-                await this.logTweet('MODEL STATS THREAD', tweets.join('\n\n'));
-            } else {
-                let lastTweetId;
-                for (const tweet of tweets) {
-                    const response = lastTweetId ?
-                        await this.twitter.v2.reply(tweet, lastTweetId) :
-                        await this.twitter.v2.tweet(tweet);
-                    lastTweetId = response.data.id;
-                }
-            }
-
-        } catch (error) {
-            console.error('Error posting model stats tweets:', error);
-        }
-    }
-
+    // This function is kept as it might be useful for other features,
+    // but it's no longer directly used by the primary postModelStatsTweets.
     getMostAccurateMethod(methodStats) {
         const accuracies = {
             'KO/TKO': methodStats.ko_tko.correct / methodStats.ko_tko.total,
@@ -1397,6 +1224,7 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             .sort(([, a], [, b]) => b - a)[0][0];
     }
 
+    // Restored generateWeeklyState function
     async generateWeeklyState() {
         try {
             const lastEvent = await database.query(`
@@ -1412,15 +1240,15 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
                 ORDER BY e.Date DESC
                 LIMIT 1
             `);
-    
+
             if (!lastEvent?.[0]) {
                 throw new Error('No completed events found');
             }
-    
+
             // Modified query with explicit JSON boolean handling
             const predictions = await database.query(`
                 WITH RECURSIVE fight_predictions AS (
-                    SELECT 
+                    SELECT
                         sp.model_used,
                         po.fight_outcomes,
                         json_each.value as fight
@@ -1508,53 +1336,55 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             });
     
             const weeklyThread = await this.openai.chat.completions.create({
-                model: "chatgpt-4o-latest",
+                model: "chatGPT-latest",
                 messages: [{
                     role: "system",
-                    content: `You're Fight Genie - A Discord bot powered by AI sharing a weekly update. Use these stats:
-    
+                    content: `You're Fight Genie - A Discord bot powered by AI sharing a weekly update. Your goal is to create an engaging 3-tweet thread summarizing the last event's AI performance and previewing the next.
+
+                    **Make each week's thread feel fresh!** Choose a slightly different angle or focus each time. Examples:
+                    - Focus heavily on the model vs. model competition this week.
+                    - Highlight a particularly impressive (or surprising) lock pick performance.
+                    - Emphasize the overall accuracy trend over the last few events (if data allows).
+                    - Start with a strong hook about the upcoming event before diving into last week's stats.
+
+                    **Core Information to Include (adapt phrasing each week):**
+                    - Last Event: ${lastEvent[0].Event}
+                    - Upcoming Event: ${upcomingEvent?.Event}
+                    - GPT Performance (Last Event): ${gptWinRate}% win rate (${gptStats.correct_predictions}/${gptStats.total_predictions}), Locks: ${gptStats.lock_wins}/${gptStats.total_locks}
+                    - Claude Performance (Last Event): ${claudeWinRate}% win rate (${claudeStats.correct_predictions}/${claudeStats.total_predictions}), Locks: ${claudeStats.lock_wins}/${claudeStats.total_locks}
+                    - Mention promo codes dropping for ${upcomingEvent?.Event}.
+                    - Call to action: Invite Fight Genie to Discord (link in bio/website).
+                    - Website: https://fightgenie.ai
+
+                    **Tweet Thread Structure (General Guide - Adapt based on chosen angle):**
+                    1.  **Hook & Last Event Summary:** Start with an engaging hook (maybe related to your chosen angle). Briefly summarize BOTH models' performance for ${lastEvent[0].Event}.
+                    2.  **Deeper Dive / Lock Picks:** Elaborate on the chosen angle (e.g., model comparison details, lock pick story).
+                    3.  **Upcoming Event & CTA:** Preview ${upcomingEvent?.Event}, mention promo codes, and include the Discord invite/website link.
+
+                    **Tone & Style:**
+                    - Casual, engaging, and stats-focused but sound human.
+                    - Use relevant emojis naturally (🤖🥊📊🔒📈).
+                    - Include #UFC #FightGenie hashtags. Maybe add #${upcomingEvent?.Event?.replace(/[^a-zA-Z0-9]/g, '')}.
+
+                    **Important Rules:**
+                    - NEVER use "**Tweet X:**" or similar numbering.
+                    - Ensure tweets flow naturally.
+                    - Always mention both models' actual performance from the provided stats.
+                    - If a model's win rate was low (<60%), you can optionally mention "limited data" or "learning phase" briefly.
+                    - Maintain a confident tone about the AI's capabilities and upcoming predictions.
+                    - Emphasize the fun, competitive aspect between GPT and Claude.
+                    - Keep tweets concise for Twitter.
+
+                    **Stats Provided:**
                     Last Event (${lastEvent[0].Event}) Performance:
     
-                    GPT-4o Stats:
-                    Total Picks: ${gptStats.total_predictions}
-                    Correct Picks: ${gptStats.correct_predictions}
-                    Win Rate: ${gptWinRate}%
-                    Lock Picks (70%+): ${gptStats.lock_wins}/${gptStats.total_locks}
-    
-                    Claude-3.5 Stats:
-                    Total Picks: ${claudeStats.total_predictions}
-                    Correct Picks: ${claudeStats.correct_predictions}
-                    Win Rate: ${claudeWinRate}%
-                    Lock Picks (70%+): ${claudeStats.lock_wins}/${claudeStats.total_locks}
-    
+                    GPT: ${gptWinRate}% (${gptStats.correct_predictions}/${gptStats.total_predictions}), Locks: ${gptStats.lock_wins}/${gptStats.total_locks}
+                    Claude: ${claudeWinRate}% (${claudeStats.correct_predictions}/${claudeStats.total_predictions}), Locks: ${claudeStats.lock_wins}/${claudeStats.total_locks}
                     Next Event: ${upcomingEvent?.Event}
-    
-                    Create a 3-tweet thread following these guidelines:
-                    1. Never use "**Tweet X:**" format
-                    2. Structure tweets naturally as a conversation while maintaining structure.
-                    3. Each tweet should flow from the previous one
-                    4. Cover these topics in order:
-                       - Both models' performance summary for last event
-                       - Lock pick performance comparison between models
-                       - Preview of upcoming card (${upcomingEvent?.Event})
-                       - Mention that promo codes for ${upcomingEvent?.Event} will be dropping later in the week
-                       - This is a Discord bot so mention inviting Fight Genie to your server and link is in our bio or on our website
-                       - Website: https://fightgenie.ai
-                    5. Keep tone casual and stats-focused, sound human.
-                    6. Use relevant emojis naturally
-                    7. Include #UFC #FightGenie hashtags
-    
-                    Important context rules:
-                    - Always mention both models' actual performance
-                    - If either model had lock picks, highlight them specifically
-                    - If either model's win rate was below 60%, mention limited data availability as a factor
-                    - Always maintain confident tone about upcoming predictions
-                    - When mentioning performance issues, frame it as a data availability challenge
-                    - Emphasize the competitive aspect between GPT-4o and Claude-3.5
-    
-                    Never mention tweet numbers or use artificial separators.`
+
+                    Now, generate the 3-tweet thread based on these instructions and stats.`
                 }],
-                temperature: 0.7
+                temperature: 0.75 // Slightly increased temperature for more variability
             });
     
             return weeklyThread.choices[0].message.content;
@@ -1563,53 +1393,131 @@ Claude-3.5: ${claudeStats.lock_wins}/${claudeStats.total_locks} (${claudeStats.l
             throw error;
         }
     }
+    // */ // Keep the function, remove the outer comment block
 
-// Weekly state posting method
-async postWeeklyState() {
-    try {
-        const weeklyThread = await this.generateWeeklyState();
-        if (!weeklyThread) {
-            console.error('No weekly thread content generated');
-            return;
-        }
+    // New function specifically for posting UFC History/Promo tweet
+    async postUfcHistoryPromoTweet() {
+        try {
+            console.log('Executing UFC history and event promo tweet...');
+            const event = await this.getUpcomingEvent();
 
-        const tweets = weeklyThread.split('\n\n').filter(tweet => tweet.trim());
-        
-        if (tweets.length === 0) {
-            console.error('No valid tweets after splitting content');
-            return;
-        }
-
-        if (this.testMode) {
-            console.log('\n=== FIGHT GENIE WEEKLY STATE ===\n');
-            tweets.forEach((tweet, i) => {
-                console.log(`Tweet ${i + 1}:\n${tweet}\n`);
-            });
-            return;
-        }
-
-        let lastTweetId;
-        for (const tweet of tweets) {
-            try {
-                const response = lastTweetId ?
-                    await this.twitter.v2.reply(tweet.slice(0, 4000), lastTweetId) :
-                    await this.twitter.v2.tweet(tweet.slice(0, 4000));
-                lastTweetId = response.data.id;
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            } catch (error) {
-                console.error('Error posting individual tweet:', error);
-                throw error;
+            if (!event) {
+                console.log('No upcoming event found for UFC history/promo tweet.');
+                return;
             }
+
+            // Generate the historical fact using AI
+            const historyPrompt = {
+                role: "system",
+                content: `You are an expert UFC historian. Create an interesting historical UFC fact that:
+                1. Is verifiably true and significant
+                2. Would be fascinating to both casual and hardcore MMA fans
+                3. Has some thematic or narrative connection to ${event.Event}
+                4. Involves either:
+                   - A similar matchup/situation
+                   - The same weight class
+                   - The same venue
+                   - A similar stakes/title situation
+                   - Or a relevant record/milestone
+                5. Would make fans more excited for the upcoming event
+                
+                Focus on dramatic moments, significant records, or compelling narratives.
+                Include specific details like dates and numbers where relevant.
+                Consider current storylines and fan interests.
+                Look for unique angles that highlight the significance of the upcoming event.`
+            };
+
+            const historyCompletion = await this.openai.chat.completions.create({
+                model: "chatGPT-latest",
+                messages: [historyPrompt],
+                temperature: 0.9
+            });
+
+            const historicalFact = historyCompletion.choices[0].message.content;
+
+            // Generate the tweet content
+            const tweetContent = await this.generateTweet({
+                historical: { fact: historicalFact, generated: true },
+                event: event
+            }, 'ufc_history');
+
+            if (!tweetContent) {
+                console.error('Failed to generate UFC history/promo tweet content.');
+                return;
+            }
+
+            // Post or log the tweet
+            if (this.testMode) {
+                console.log('\n=== UFC HISTORY/PROMO TWEET (Test Mode) ===\n', tweetContent);
+                await this.logTweet('UFC HISTORY PROMO', event.event_id, tweetContent); // Use consistent uppercase type
+            } else {
+                console.log('Posting UFC history/promo tweet...');
+                try {
+                    await this.twitter.v2.tweet(tweetContent.slice(0, 4000));
+                    await this.logTweet('UFC HISTORY PROMO', event.event_id, tweetContent); // Use consistent uppercase type
+                    console.log('UFC history/promo tweet posted successfully.');
+                } catch (error) {
+                    console.error('Error posting UFC history/promo tweet:', error);
+                    if (error.data) console.error('Twitter API Error:', error.data);
+                    // Don't log if posting failed
+                }
+            }
+        } catch (error) {
+            console.error('Error in postUfcHistoryPromoTweet:', error);
         }
-        console.log('Posted weekly state thread');
-    } catch (error) {
-        console.error('Error posting weekly state:', error);
-        throw error;
     }
-}
 
+    // Restored postWeeklyState function
+    async postWeeklyState() {
+        try {
+            const weeklyThread = await this.generateWeeklyState();
+            if (!weeklyThread) {
+                console.error('No weekly thread content generated');
+                return;
+            }
 
-// Move checkTweetSent to be a class method
+            // Split the content, filter empty/placeholder tweets, and limit thread length
+            const MAX_THREAD_TWEETS = 3; // Limit threads to 3 tweets max
+            const tweets = weeklyThread.split('\n\n')
+                .map(tweet => tweet.trim()) // Trim whitespace first
+                .filter(tweet => tweet && tweet !== '---') // Remove empty and "---" tweets
+                .slice(0, MAX_THREAD_TWEETS); // Limit to max number
+
+            if (tweets.length === 0) {
+                console.error('No valid tweets generated for weekly state after filtering.');
+                return;
+            }
+
+            if (this.testMode) {
+                console.log('\n=== FIGHT GENIE WEEKLY STATE ===\n');
+                tweets.forEach((tweet, i) => {
+                    console.log(`Tweet ${i + 1}:\n${tweet}\n`);
+                });
+                return;
+            }
+
+            let lastTweetId;
+            for (const tweet of tweets) {
+                try {
+                    const response = lastTweetId ?
+                        await this.twitter.v2.reply(tweet.slice(0, 4000), lastTweetId) :
+                        await this.twitter.v2.tweet(tweet.slice(0, 4000));
+                    lastTweetId = response.data.id;
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (error) {
+                    console.error('Error posting individual tweet:', error);
+                    throw error;
+                }
+            }
+            console.log('Posted weekly state thread');
+        } catch (error) {
+            console.error('Error posting weekly state:', error);
+            throw error;
+        }
+    }
+    // */ // Keep the function, remove the outer comment block
+
+    // Move checkTweetSent to be a class method
 async checkTweetSent(type, eventId = null) {
     const query = eventId
         ? `SELECT * FROM tweet_logs 
@@ -1655,23 +1563,29 @@ async scheduleTweets() {
         schedule.scheduledJobs[jobName].cancel();
     });
 
-    // Weekly State Report - Mondays at 6:26 PM
+    // Restored Weekly State Report schedule
     schedule.scheduleJob('weekly-state', '26 18 * * 1', async () => {
         try {
-            if (!(await this.checkTweetSent('weekly_state'))) {
+            // Use uppercase type consistent with others for checkTweetSent
+            if (!(await this.checkTweetSent('WEEKLY STATE'))) {
                 console.log('Executing Monday weekly state thread');
                 await this.postWeeklyState();
-                await this.logTweet('weekly_state');
+                // Logging now uses uppercase and is handled within postWeeklyState if successful
+                // await this.logTweet('WEEKLY STATE'); // Log handled internally now
+            } else {
+                 console.log('Weekly state tweet already sent today.');
             }
         } catch (error) {
-            console.error('Error posting weekly state:', error);
+            console.error('Error in scheduled weekly state job:', error);
         }
     });
+    // */ // Keep the schedule, remove the outer comment block
 
-    // Value Picks - Mondays at 10:23 PM
+    // Value Picks - Tuesdays at 11:53 AM
     schedule.scheduleJob('value-picks', '53 11 * * 2', async () => {
         try {
-            if (!(await this.checkTweetSent('value_picks'))) {
+            // Check if a value pick tweet was already sent today (using null eventId)
+            if (!(await this.checkTweetSent('VALUE PICK'))) {
                 console.log('Executing value pick tweets');
                 const event = await this.getUpcomingEvent();
                 if (event) {
@@ -1684,75 +1598,36 @@ async scheduleTweets() {
         }
     });
 
-    // UFC History & Event Promo - Tuesdays at 7:40 PM
+    // UFC History & Event Promo - Wednesdays at 7:40 PM (Now calls the dedicated function)
     schedule.scheduleJob('ufc-history-promo', '40 19 * * 3', async () => {
         try {
-            if (!(await this.checkTweetSent('ufc_history_promo'))) {
-                console.log('Executing UFC history and event promo');
-                const event = await this.getUpcomingEvent();
-
-                if (!event) {
-                    console.log('No upcoming event found');
-                    return;
-                }
-
-                const historyPrompt = {
-                    role: "system",
-                    content: `You are an expert UFC historian. Create an interesting historical UFC fact that:
-                    1. Is verifiably true and significant
-                    2. Would be fascinating to both casual and hardcore MMA fans
-                    3. Has some thematic or narrative connection to ${event.Event}
-                    4. Involves either:
-                       - A similar matchup/situation
-                       - The same weight class
-                       - The same venue
-                       - A similar stakes/title situation
-                       - Or a relevant record/milestone
-                    5. Would make fans more excited for the upcoming event
-                    
-                    Focus on dramatic moments, significant records, or compelling narratives.
-                    Include specific details like dates and numbers where relevant.
-                    Consider current storylines and fan interests.
-                    Look for unique angles that highlight the significance of the upcoming event.`
-                };
-
-                const historyCompletion = await this.openai.chat.completions.create({
-                    model: "chatgpt-4o-latest",
-                    messages: [historyPrompt],
-                    temperature: 0.9
-                });
-
-                const tweet = await this.generateTweet({
-                    historical: {
-                        fact: historyCompletion.choices[0].message.content,
-                        generated: true
-                    },
-                    event: event
-                }, 'ufc_history');
-
-                if (!this.testMode) {
-                    await this.twitter.v2.tweet(tweet);
-                }
-                await this.logTweet('ufc_history_promo', event.event_id, tweet);
-                console.log('Posted UFC history and event promo');
+            // Use consistent uppercase type for check
+            if (!(await this.checkTweetSent('UFC HISTORY PROMO'))) {
+                await this.postUfcHistoryPromoTweet();
+                // Logging is handled within postUfcHistoryPromoTweet
+            } else {
+                 console.log('UFC history/promo tweet already sent today.');
             }
         } catch (error) {
-            console.error('Error posting UFC history promo:', error);
+            console.error('Error in scheduled UFC history/promo job:', error);
         }
     });
 
-    // Model Competition - Sundays at 2:00 PM
-    schedule.scheduleJob('model-competition', '0 14 * * 0', async () => {
-        try {
-            if (!(await this.checkTweetSent('model_competition'))) {
-                console.log('Executing Sunday model competition tweets');
-                await this.postModelComparisonTweet();
-                await this.logTweet('model_competition');
-            }
-        } catch (error) {
-            console.error('Error posting model competition:', error);
-        }
-    });
+    // Model Competition Stats - Disabled to prevent the specific tweet format shown in the image
+    // schedule.scheduleJob('model-competition', '0 14 * * 0', async () => {
+    //     try {
+    //         // Check if a model competition tweet was already sent today (using null eventId)
+    //         if (!(await this.checkTweetSent('MODEL COMPETITION'))) {
+    //             console.log('Executing Sunday model competition stats thread...');
+    //             await this.postModelStatsTweets(); // Calls the consolidated function
+    //             // Logging is handled within postModelStatsTweets
+    //         } else {
+    //              console.log('Model competition tweet already sent today.');
+    //         }
+    //     } catch (error) {
+    //         console.error('Error in scheduled model competition job:', error);
+    //     }
+    // });
 
     // Saturday Updates - Starting at 3:00 PM
     schedule.scheduleJob('saturday-update', '00 14 * * 6', async () => {
@@ -1794,4 +1669,53 @@ async scheduleTweets() {
 
 }
 
-module.exports = TweetAutomation;
+// Command-line execution logic
+if (require.main === module) {
+    (async () => {
+        require('dotenv').config(); // Load .env variables
+
+        const tweetType = process.argv[2]; // Get the tweet type from command line argument
+        if (!tweetType) {
+            console.error('Error: Please provide a tweet type as a command line argument.');
+            console.log('Available types: fight_analysis, value_pick, model_competition, weekly_state, ufc_history_promo');
+            process.exit(1);
+        }
+
+        const automation = new TweetAutomation();
+        // Ensure test mode respects environment variable even for manual runs
+        automation.testMode = process.env.TWEET_TEST_MODE === 'true'; 
+        console.log(`Manually triggering tweet type: ${tweetType} (Test Mode: ${automation.testMode})`);
+
+        try {
+            switch (tweetType.toLowerCase()) {
+                case 'fight_analysis':
+                    await automation.postFightAnalysisTweet();
+                    break;
+                case 'value_pick':
+                    await automation.postValuePickTweet();
+                    break;
+                case 'model_competition':
+                    await automation.postModelStatsTweets();
+                    break;
+                case 'weekly_state':
+                    await automation.postWeeklyState();
+                    break;
+                case 'ufc_history_promo':
+                    await automation.postUfcHistoryPromoTweet();
+                    break;
+                default:
+                    console.error(`Error: Unknown tweet type "${tweetType}".`);
+                    console.log('Available types: fight_analysis, value_pick, model_competition, weekly_state, ufc_history_promo');
+                    process.exit(1);
+            }
+            console.log(`Manual trigger for ${tweetType} completed.`);
+            // Explicitly exit after completion
+             process.exit(0); 
+        } catch (error) {
+            console.error(`Error during manual trigger for ${tweetType}:`, error);
+            process.exit(1);
+        }
+    })();
+} else {
+    module.exports = TweetAutomation;
+}

@@ -3,22 +3,11 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 class FighterStats {
-    // Cache to store fighter stats
-    static statsCache = new Map();
-    static CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
-
     static async getFighterStats(fighterName) {
         try {
             if (!fighterName) {
                 console.error('Invalid fighter name provided to getFighterStats');
                 return null;
-            }
-
-            // Check cache first
-            const cachedStats = this.statsCache.get(fighterName);
-            if (cachedStats && Date.now() - cachedStats.timestamp < this.CACHE_DURATION) {
-                console.log(`Using cached stats for ${fighterName}`);
-                return cachedStats.data;
             }
 
             // Get stats from database
@@ -41,12 +30,6 @@ class FighterStats {
                 record,
                 last_updated: stats[0].updated_at || new Date().toISOString()
             };
-
-            // Update cache
-            this.statsCache.set(fighterName, {
-                data: fighterStats,
-                timestamp: Date.now()
-            });
 
             return fighterStats;
         } catch (error) {

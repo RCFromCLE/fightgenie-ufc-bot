@@ -248,7 +248,7 @@ const {
   
                   .setColor("#0099ff")
   
-                  .setTitle("👑 GPT-4o vs. Claude-3.5")
+                  .setTitle("👑 GPT vs. Claude")
   
                   .setDescription([
   
@@ -263,10 +263,65 @@ const {
       
   
               const modelStats = {};
-  
+              let totalDoubleLocks = 0;
+              let correctDoubleLocks = 0;
+              const processedDoubleLocks = new Set(); // To avoid double counting if processing main/prelims separately
+
+              // --- Process results to calculate Double Lock stats ---
+              const resultsByEvent = allResults.reduce((acc, result) => {
+                  if (!acc[result.event_id]) {
+                      acc[result.event_id] = { Event: result.Event, Date: result.Date, predictions: [] };
+                  }
+                  acc[result.event_id].predictions.push(result);
+                  return acc;
+              }, {});
+
+              for (const eventId in resultsByEvent) {
+                  const eventData = resultsByEvent[eventId];
+                  const predictions = eventData.predictions;
+                  const fightsInEvent = {};
+
+                  // Group fights within the event
+                  predictions.forEach(predResult => {
+                      predResult.verifiedFights.forEach(fight => {
+                          const fightKey = [fight.fighter1, fight.fighter2].sort().join('_vs_');
+                          if (!fightsInEvent[fightKey]) {
+                              fightsInEvent[fightKey] = { fighter1: fight.fighter1, fighter2: fight.fighter2, models: {}, actual_winner: fight.actual_winner };
+                          }
+                          fightsInEvent[fightKey].models[predResult.model] = {
+                              predictedWinner: fight.predictedWinner,
+                              confidence: fight.confidence
+                          };
+                      });
+                  });
+
+                  // Check for double locks in this event
+                  for (const fightKey in fightsInEvent) {
+                      const fightData = fightsInEvent[fightKey];
+                      const gptPred = fightData.models['gpt'];
+                      const claudePred = fightData.models['claude'];
+                      const lockKey = `${eventId}_${fightKey}`; // Unique key per event/fight
+
+                      if (gptPred && claudePred && !processedDoubleLocks.has(lockKey)) {
+                          if (gptPred.predictedWinner === claudePred.predictedWinner &&
+                              gptPred.confidence >= 75 &&
+                              claudePred.confidence >= 75)
+                          {
+                              totalDoubleLocks++;
+                              processedDoubleLocks.add(lockKey); // Mark as processed
+                              if (gptPred.predictedWinner === fightData.actual_winner) {
+                                  correctDoubleLocks++;
+                              }
+                          }
+                      }
+                  }
+              }
+              // --- End Double Lock Calculation ---
+
+
               allResults.forEach(result => {
-  
-                  if (!modelStats[result.model]) {
+                  const modelKey = result.model; // Use modelKey consistently
+                  if (!modelStats[modelKey]) { // Use modelKey
   
                       modelStats[result.model] = {
   
@@ -286,31 +341,32 @@ const {
   
                       };
   
+                      modelStats[modelKey] = { // Use modelKey
+                          events: new Set(),
+                          fights_predicted: 0,
+                          correct_predictions: 0,
+                          method_correct: 0,
+                          confidence_sum: 0,
+                          high_confidence_fights: 0, // This is for individual model locks (>=75%)
+                          high_confidence_correct: 0
+                      };
                   }
-  
-                  
-  
-                  modelStats[result.model].events.add(result.event_id);
-  
-                  modelStats[result.model].fights_predicted += result.fights_predicted;
-  
-                  modelStats[result.model].correct_predictions += result.correct_predictions;
-  
-                  modelStats[result.model].method_correct += result.method_correct;
-  
-                  modelStats[result.model].confidence_sum += result.confidence_sum;
+
+                  const stats = modelStats[modelKey]; // Use modelKey and assign to stats
+
+                  stats.events.add(result.event_id);
+                  stats.fights_predicted += result.fights_predicted;
+                  stats.correct_predictions += result.correct_predictions;
+                  stats.method_correct += result.method_correct;
+                  stats.confidence_sum += result.confidence_sum;
   
       
-  
+                  // Calculate individual model lock rate (>=75%)
                   result.verifiedFights.forEach(fight => {
-  
-                      if (Number(fight.confidence) >= 70) {
-  
-                          modelStats[result.model].high_confidence_fights++;
-  
+                      if (Number(fight.confidence) >= 75) { // Use 75% for lock definition
+                          stats.high_confidence_fights++;
                           if (fight.isCorrect) {
-  
-                              modelStats[result.model].high_confidence_correct++;
+                              stats.high_confidence_correct++;
   
                           }
   
@@ -324,11 +380,9 @@ const {
   
               Object.entries(modelStats).forEach(([model, stats]) => {
   
-                  const modelName = model === "gpt" ? "GPT-4" : "Claude-3.5";
-  
+                  const modelName = model === "gpt" ? "GPT" : "Claude"; // Keep consistent naming
                   const modelEmoji = model === "gpt" ? "🧠" : "🤖";
-  
-                  
+
   
                   const winRate = ((stats.correct_predictions / stats.fights_predicted) * 100).toFixed(1);
   
@@ -336,11 +390,10 @@ const {
   
                   const avgConfidence = (stats.confidence_sum / stats.fights_predicted).toFixed(1);
   
-                  const lockRate = stats.high_confidence_fights > 0 ? 
-  
+                  // Use 75% for lock rate calculation display
+                  const lockRate = stats.high_confidence_fights > 0 ?
                       ((stats.high_confidence_correct / stats.high_confidence_fights) * 100).toFixed(1) : '0.0';
-  
-      
+
   
                   embed.addFields({
   
@@ -350,7 +403,7 @@ const {
   
                           "\n",
   
-                          `📊 Events Analyzed: ${modelName === "Claude-3.5" ? stats.events.size + 1 : stats.events.size}`,
+                          `📊 Events Analyzed: ${modelName === "Claude" ? stats.events.size + 1 : stats.events.size}`,
   
                           `📈 Fights Predicted: ${stats.fights_predicted}\n`,
   
@@ -359,11 +412,8 @@ const {
   
   
                           `🎯 Win Rate: ${winRate}%`,
-  
-                          `🔒 Lock Rate: ${lockRate}% (${stats.high_confidence_correct}/${stats.high_confidence_fights})`,
-  
+                          `🔒 Lock Rate (>=75%): ${lockRate}% (${stats.high_confidence_correct}/${stats.high_confidence_fights})`, // Clarify lock threshold
                           `🎨 Method Accuracy: ${methodAccuracy}%`,
-  
                           `⚖️ Average Confidence: ${avgConfidence}%`,
   
                           "━━━━━━━━━━━━━━━━━━━━━━━",
@@ -385,9 +435,17 @@ const {
                   embed.addFields({ name: '\u200b', value: '\u200b', inline: true });
   
               }
-  
-      
-  
+
+              // --- Add Double Lock Stats Field ---
+              const doubleLockRate = totalDoubleLocks > 0 ? ((correctDoubleLocks / totalDoubleLocks) * 100).toFixed(1) : '0.0';
+              embed.addFields({
+                  name: `🔒 Double Lock Performance (GPT & Claude >=75%)`,
+                  value: `Accuracy: **${doubleLockRate}%** (${correctDoubleLocks}/${totalDoubleLocks})`,
+                  inline: false // Display prominently
+              });
+              embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━' }); // Separator
+              // --- End Double Lock Stats Field ---
+
               embed.addFields({
   
                   name: " ",
@@ -398,11 +456,11 @@ const {
   
                       "",
   
-                      "🔒 **Lock Rate**: Performance on highest confidence picks (75%+), referred to as *locks*",
-  
+                      "🔒 **Lock Rate**: Performance on each model's high confidence picks (>=75%)", // Clarified definition
                       "",
-  
-                      "🎨 **Method Accuracy**: Correct fight ending predictions",
+                      "🔒 **Double Lock**: Fights where BOTH models predict the same winner with >=75% confidence", // Added definition
+                      "",
+                      "🎨 **Method Accuracy**: Correct fight ending predictions (KO/TKO, Sub, Decision)", // Clarified
   
                       "",
   
@@ -654,7 +712,7 @@ const {
   
                       const modelEmoji = pred.model_used === "gpt" ? "🧠" : "🤖";
   
-                      const modelName = pred.model_used === "gpt" ? "GPT-4" : "Claude-3.5";
+                      const modelName = pred.model_used === "gpt" ? "GPT" : "Claude";
   
                       const cardType = pred.card_type === "main" ? "Main Card" : "Prelims";
   

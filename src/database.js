@@ -2,7 +2,7 @@ const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const client = require('../index').client;
+// const client = require('../index').client; // Removed to break circular dependency
 
 
 class DatabaseManager {
@@ -98,155 +98,17 @@ async initializeDatabase() {
         // Create odds tables
         await this.createOddsTables();
 
-        // Create payment tables
-        await this.createPaymentTables();
+        // Create payment tables (REMOVED as they are no longer needed)
+        // await this.createPaymentTables();
 
         console.log("Database tables initialized successfully");
     } catch (error) {
         console.error("Error initializing database:", error);
         throw error;
-    }
-}
-
-  async createPaymentTables() {
-      try {
-
-        
-          // First check if tables exist
-          const existingTables = await this.query(`
-              SELECT name FROM sqlite_master 
-              WHERE type='table' AND name='server_subscriptions'
-          `);
-
-          if (existingTables.length > 0) {
-              console.log('Updating existing server_subscriptions table...');
-              
-              // Check for missing columns
-              const columns = await this.query(`PRAGMA table_info(server_subscriptions)`);
-              
-              if (!columns.find(col => col.name === 'event_id')) {
-                  await this.query(`
-                      ALTER TABLE server_subscriptions 
-                      ADD COLUMN event_id TEXT
-                  `);
-              }
-
-              // Create or update indices
-              await this.query(`
-                  CREATE INDEX IF NOT EXISTS idx_server_subs_server 
-                  ON server_subscriptions(server_id)
-              `);
-
-              await this.query(`
-                  CREATE INDEX IF NOT EXISTS idx_server_subs_expiration 
-                  ON server_subscriptions(expiration_date)
-              `);
-          } else {
-              console.log('Creating new server_subscriptions table...');
-              
-              // Create new table if it doesn't exist
-              await this.query(`
-                  CREATE TABLE IF NOT EXISTS server_subscriptions (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      server_id TEXT NOT NULL,
-                      subscription_type TEXT NOT NULL,
-                      payment_id TEXT UNIQUE,
-                      status TEXT NOT NULL,
-                      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                      expiration_date DATETIME,
-                      event_id TEXT
-                  )
-              `);
-
-              // Create indices
-              await this.query(`
-                  CREATE INDEX IF NOT EXISTS idx_server_subs_server 
-                  ON server_subscriptions(server_id)
-              `);
-
-              await this.query(`
-                  CREATE INDEX IF NOT EXISTS idx_server_subs_expiration 
-                  ON server_subscriptions(expiration_date)
-              `);
-          }
-
-          await database.query(`
-            CREATE TABLE IF NOT EXISTS solana_payments (
-                payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                payment_address TEXT UNIQUE NOT NULL,
-                keypair_secret TEXT NOT NULL,
-                status TEXT NOT NULL,
-                amount_sol DECIMAL(20,8),
-                transaction_signature TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                completed_at DATETIME,
-                server_id TEXT,
-                payment_type TEXT
-            )
-        `);
-
-        await database.query(`
-            CREATE INDEX IF NOT EXISTS idx_solana_payments_address 
-            ON solana_payments(payment_address)
-        `);
-
-        await database.query(`
-            CREATE INDEX IF NOT EXISTS idx_solana_payments_status 
-            ON solana_payments(status)
-        `);
-
-          // Handle triggers with proper error checking
-          try {
-              // Check if triggers exist
-              const existingTriggers = await this.query(`
-                  SELECT name FROM sqlite_master 
-                  WHERE type='trigger' 
-                  AND (name='update_server_subs_timestamp' OR name='cleanup_expired_subscriptions')
-              `);
-
-              // Drop existing triggers if they exist
-              if (existingTriggers.length > 0) {
-                  console.log('Updating existing triggers...');
-                  for (const trigger of existingTriggers) {
-                      await this.query(`DROP TRIGGER IF EXISTS ${trigger.name}`);
-                  }
-              }
-
-              // Create triggers
-              await this.query(`
-                  CREATE TRIGGER IF NOT EXISTS update_server_subs_timestamp 
-                  AFTER UPDATE ON server_subscriptions
-                  BEGIN
-                      UPDATE server_subscriptions 
-                      SET updated_at = CURRENT_TIMESTAMP
-                      WHERE id = NEW.id;
-                  END
-              `);
-
-              await this.query(`
-                  CREATE TRIGGER IF NOT EXISTS cleanup_expired_subscriptions
-                  AFTER INSERT ON server_subscriptions
-                  BEGIN
-                      UPDATE server_subscriptions 
-                      SET status = 'EXPIRED' 
-                      WHERE expiration_date < datetime('now')
-                      AND subscription_type = 'EVENT'
-                      AND status = 'ACTIVE';
-                  END
-              `);
-
-              console.log("Payment tables setup complete");
-          } catch (triggerError) {
-              console.error("Error handling triggers:", triggerError);
-              // Continue execution even if trigger creation fails
-          }
-
-      } catch (error) {
-          console.error("Error creating payment tables:", error);
-          throw error;
       }
   }
+
+  // Removed createPaymentTables method as it's no longer needed
 
   async getModelComparisonStats() {
     try {
@@ -474,90 +336,11 @@ async initializeDatabase() {
         };
     } catch (error) {
         console.error('Error activating server event access:', error);
-        throw error;
+      throw error;
     }
 }
 
-  async checkServerAccess(serverId, eventId) {
-    try {
-        // Query the database to check if the server has active subscriptions
-        const query = `
-            SELECT * FROM subscriptions
-            WHERE server_id = ? AND (event_id = ? OR ? IS NULL) AND active = 1
-        `;
-        const params = [serverId, eventId, eventId];
-        const [rows] = await database.execute(query, params);
-
-        const hasAccess = rows.length > 0;
-        console.log(`💳 Found ${rows.length} active subscriptions`);
-        console.log(`Server ${hasAccess ? 'has' : 'does not have'} event access`);
-        
-        return hasAccess;
-    } catch (error) {
-        console.error('Error checking server access:', error);
-        return false;
-    }
-}
-
-async verifyAccess(serverId, eventId = null) {
-  try {
-      console.log('\n=== Server Access Verification Started ===');
-      console.log(`🔍 Checking access for Server ID: ${serverId}`);
-      console.log(`🎯 Event ID: ${eventId || 'No specific event'}`);
-
-      // First check for lifetime access
-      const lifetimeAccess = await this.query(`
-          SELECT * FROM server_subscriptions 
-          WHERE server_id = ? 
-          AND subscription_type = 'LIFETIME'
-          AND status = 'ACTIVE'
-      `, [serverId]);
-
-      if (lifetimeAccess.length > 0) {
-          console.log('✅ LIFETIME ACCESS VERIFIED');
-          return true;
-      }
-
-      // If no lifetime access and no specific event requested, check for any active event access
-      if (!eventId) {
-          const anyEventAccess = await this.query(`
-              SELECT * FROM server_subscriptions
-              WHERE server_id = ?
-              AND subscription_type = 'EVENT'
-              AND status = 'ACTIVE'
-              AND expiration_date > datetime('now')
-          `, [serverId]);
-
-          if (anyEventAccess.length > 0) {
-              console.log('✅ ACTIVE EVENT ACCESS FOUND');
-              return true;
-          }
-      }
-
-      // Check for specific event access if eventId provided
-      if (eventId) {
-          const eventAccess = await this.query(`
-              SELECT * FROM server_subscriptions
-              WHERE server_id = ?
-              AND event_id = ?
-              AND subscription_type = 'EVENT'
-              AND status = 'ACTIVE'
-              AND expiration_date > datetime('now')
-          `, [serverId, eventId]);
-
-          if (eventAccess.length > 0) {
-              console.log(`✅ EVENT ACCESS VERIFIED FOR EVENT ${eventId}`);
-              return true;
-          }
-      }
-
-      console.log('❌ NO VALID ACCESS FOUND');
-      return false;
-  } catch (error) {
-      console.error('Error verifying access:', error);
-      return false;
-  }
-}
+  // Removed checkServerAccess and verifyAccess methods as they are no longer needed
 
   async createFightersTable() {
     try {
@@ -807,6 +590,7 @@ async verifyAccess(serverId, eventId = null) {
             FROM events 
             WHERE Date IN (date('now', '-1 day'), date('now'))
             AND Event LIKE 'UFC%'
+            AND is_completed = 0
             ORDER BY Date DESC
             LIMIT 1
         `;
@@ -839,6 +623,7 @@ static async getUpcomingEvent() {
               FROM events 
               WHERE Date >= date('now', '-1 day')
               AND Event LIKE 'UFC%'
+              AND is_completed = 0
               ORDER BY Date ASC
               LIMIT 1
           `;
@@ -1830,61 +1615,9 @@ async insertEventFight(event, fight) {
         }
       );
     });
-  }
-
-  async cleanupExpiredSubscriptions() {
-    try {
-        console.log('\n=== Starting Subscription Cleanup ===');
-        const before = await this.query(`
-            SELECT COUNT(*) as count 
-            FROM server_subscriptions 
-            WHERE status = 'ACTIVE' 
-            AND subscription_type = 'EVENT'`
-        );
-
-        const result = await this.query(`
-            UPDATE server_subscriptions 
-            SET 
-                status = 'EXPIRED',
-                updated_at = datetime('now')
-            WHERE expiration_date < datetime('now')
-            AND subscription_type = 'EVENT'
-            AND status = 'ACTIVE'
-            RETURNING server_id, event_id, expiration_date
-        `);
-
-        const after = await this.query(`
-            SELECT COUNT(*) as count 
-            FROM server_subscriptions 
-            WHERE status = 'ACTIVE' 
-            AND subscription_type = 'EVENT'`
-        );
-
-        console.log('Subscription Cleanup Results:', {
-            activeSubscriptionsBefore: before[0]?.count || 0,
-            activeSubscriptionsAfter: after[0]?.count || 0,
-            expiredCount: result?.length || 0,
-            expiredSubscriptions: result?.map(sub => ({
-                serverId: sub.server_id,
-                eventId: sub.event_id,
-                expiredAt: sub.expiration_date
-            }))
-        });
-
-        return {
-            success: true,
-            expiredCount: result?.length || 0,
-            expiredSubscriptions: result || []
-        };
-    } catch (error) {
-        console.error('Error cleaning up expired subscriptions:', error);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
 }
 
+  // Removed cleanupExpiredSubscriptions method as it's no longer needed
 
 }
 
