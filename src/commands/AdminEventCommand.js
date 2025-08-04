@@ -355,6 +355,12 @@ class AdminEventCommand {
                 DELETE FROM stored_predictions 
                 WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
             `, [event.name]);
+
+            // Also delete any stored predictions for this event to force regeneration
+            await database.query(`
+                DELETE FROM stored_predictions 
+                WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
+            `, [event.name]);
             
             await database.query('DELETE FROM events WHERE Event = ?', [event.name]);
     
@@ -452,49 +458,72 @@ class AdminEventCommand {
     
             console.log("Starting event advancement process...");
     
-            // First, let's clean up duplicates and fix completed status
-            await database.query(`
-                UPDATE events 
-                SET is_completed = 0 
-                WHERE Date > date('now')
-            `);
-    
-            // Get the earliest uncompleted event
-            const currentEvent = await database.query(`
+            // --- Simplified Current Event Logic ---
+            // Find the earliest event that is not completed and is today or in the past
+            // This aligns better with identifying the event that *should* be marked complete.
+            const currentEventResult = await database.query(`
                 SELECT DISTINCT 
-                    event_id, Date, Event, City, State, Country, event_link, is_completed
+                    event_id, Date, Event, City, State, Country, event_link
                 FROM events 
-                WHERE Date >= date('now') 
-                    AND is_completed = 0
-                ORDER BY Date ASC 
+                WHERE Date <= date('now') 
+                  AND is_completed = 0
+                  AND Event LIKE 'UFC%' -- Ensure it's a UFC event
+                ORDER BY Date ASC -- Get the oldest uncompleted one first
                 LIMIT 1
             `);
     
-            if (!currentEvent?.[0]) {
-                console.log("No current event found, fetching upcoming events...");
-                return await this.handleUpcomingEvents(message);
+            if (!currentEventResult?.[0]) {
+                // If no past/present uncompleted event, check if there's *any* uncompleted event
+                const anyUncompleted = await database.query(`
+                    SELECT event_id FROM events WHERE is_completed = 0 LIMIT 1
+                `);
+                if (!anyUncompleted?.[0]) {
+                    console.log("No uncompleted events found at all. Fetching upcoming events to potentially add one.");
+                    return await this.handleUpcomingEvents(message); // Prompt to add a new event
+                } else {
+                    // There are future uncompleted events, but none to mark complete right now.
+                    console.log("No past or present events need completion. Check upcoming events.");
+                    // Optionally, display the *next* upcoming event without marking anything complete.
+                    const nextUpcoming = await database.query(`
+                        SELECT DISTINCT Date, Event FROM events 
+                        WHERE Date >= date('now') AND is_completed = 0 
+                        ORDER BY Date ASC LIMIT 1
+                    `);
+                    let replyContent = "✅ No past or present events require completion.";
+                    if (nextUpcoming?.[0]) {
+                        replyContent += `\nThe next upcoming event is ${nextUpcoming[0].Event} on ${new Date(nextUpcoming[0].Date).toLocaleDateString()}.`;
+                    }
+                    await message.reply(replyContent);
+                    return; 
+                }
             }
     
-            console.log(`Current event found: ${currentEvent[0].Event}`);
+            const currentEvent = currentEventResult[0];
+            console.log(`Identified event to mark as completed: ${currentEvent.Event} (${currentEvent.Date})`);
     
             // Mark this event as completed
             await database.query(`
                 UPDATE events
                 SET is_completed = 1,
                     completed_at = datetime('now')
-                WHERE event_id = ?
-            `, [currentEvent[0].event_id]);
+                WHERE Event = ? 
+                  AND Date = ? -- Be specific to avoid marking future events with same name
+            `, [currentEvent.Event, currentEvent.Date]);
+            
+            console.log(`Marked ${currentEvent.Event} as completed.`);
     
-            // Get the next event
-            const nextEvent = await database.query(`
+            // --- Find the Next Upcoming Event ---
+            const nextEventResult = await database.query(`
                 SELECT DISTINCT 
                     event_id, Date, Event, City, State, Country, event_link
                 FROM events
-                WHERE Date > ?
-                    AND is_completed = 0
+                WHERE Date > ? -- Find events strictly after the one just completed
+                  AND is_completed = 0
                 ORDER BY Date ASC
                 LIMIT 1
-            `, [currentEvent[0].Date]);
+            `, [currentEvent.Date]); // Use the date of the event just completed
+            
+            const nextEvent = nextEventResult?.[0];
     
             // Force refresh fight data for next event
             if (nextEvent?.[0]?.event_link) {
@@ -520,8 +549,14 @@ class AdminEventCommand {
                     });
     
                     if (fights.length > 0) {
-                        // Clear existing fights for this event
-                        await database.query('DELETE FROM events WHERE Event = ?', [nextEvent[0].Event]);
+                        console.log(`Attempting to refresh ${fights.length} fights for ${nextEvent.Event}`);
+                        // Clear existing fights AND predictions for this event before re-inserting
+                        await database.query(`
+                            DELETE FROM stored_predictions 
+                            WHERE event_id IN (SELECT event_id FROM events WHERE Event = ?)
+                        `, [nextEvent.Event]);
+                        await database.query('DELETE FROM events WHERE Event = ?', [nextEvent.Event]);
+                        console.log(`Cleared old data for ${nextEvent.Event}`);
     
                         // Store updated fights
                         for (const fight of fights) {
@@ -532,55 +567,74 @@ class AdminEventCommand {
                                     event_link, is_main_card
                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             `, [
-                                nextEvent[0].Event,
-                                nextEvent[0].Date,
-                                nextEvent[0].City,
-                                nextEvent[0].State,
-                                nextEvent[0].Country,
+                                nextEvent.Event,
+                                nextEvent.Date,
+                                nextEvent.City,
+                                nextEvent.State,
+                                nextEvent.Country,
                                 fight.fighter1,
                                 fight.fighter2,
                                 fight.WeightClass,
-                                nextEvent[0].event_link,
+                                nextEvent.event_link,
                                 fight.is_main_card
                             ]);
                         }
-                        console.log(`Successfully updated ${fights.length} fights for next event`);
+                        console.log(`Successfully refreshed ${fights.length} fights for ${nextEvent.Event}`);
+                    } else {
+                         console.log(`No fights found during refresh scrape for ${nextEvent.Event}`);
                     }
                 } catch (scrapeError) {
-                    console.error('Error refreshing fight data:', scrapeError);
+                    console.error(`Error refreshing fight data for ${nextEvent?.Event}:`, scrapeError);
+                    // Don't halt the whole process, just log the error
                 }
+            } else if (nextEvent) {
+                 console.log(`No event link found for ${nextEvent.Event}, cannot refresh fights.`);
             }
     
+            // --- Build Response Embed ---
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle('✅ Events Advanced Successfully')
+                .setTitle('✅ Event Advanced Successfully')
                 .setDescription([
-                    '**Previous Event:**',
-                    `Event: ${currentEvent[0].Event}`,
-                    `Date: ${new Date(currentEvent[0].Date).toLocaleDateString('en-US', {
-                        weekday: 'long',
-                        month: 'long',
-                        day: 'numeric'
-                    })}`,
+                    '**Completed Event:**',
+                    `Event: ${currentEvent.Event}`,
+                    `Date: ${new Date(currentEvent.Date).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' })}`, // Added UTC timezone
                     '',
-                    nextEvent?.[0] ? 
+                    nextEvent ? 
                         [
                             '**Next Upcoming Event:**',
-                            `Event: ${nextEvent[0].Event}`,
-                            `Date: ${new Date(nextEvent[0].Date).toLocaleDateString('en-US', {
-                                weekday: 'long',
-                                month: 'long',
-                                day: 'numeric'
-                            })}`,
-                            `Location: ${nextEvent[0].City}, ${nextEvent[0].Country}`
+                            `Event: ${nextEvent.Event}`,
+                            `Date: ${new Date(nextEvent.Date).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' })}`, // Added UTC timezone
+                            `Location: ${nextEvent.City || 'TBA'}, ${nextEvent.Country || 'TBA'}`
                         ].join('\n') :
-                        'No upcoming events found.',
+                        '**No further upcoming events found in the database.**',
                     '',
-                    'Use `$upcoming` to view the new current event.'
+                    'Use `$upcoming` to view the new current event details.'
                 ].join('\n'));
+            
+            // Create buttons for updating fighter stats and running predictions
+            const predictionButtonsRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`update_fighter_stats_${nextEvent?.event_id || 'latest'}`)
+                        .setLabel('Update Fighter Stats')
+                        .setEmoji('📊')
+                        .setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder()
+                        .setCustomId(`run_all_predictions_${nextEvent?.event_id || 'latest'}`)
+                        .setLabel('Run All Predictions')
+                        .setEmoji('🔄')
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId(`view_event_${nextEvent?.event_id || 'latest'}`)
+                        .setLabel('View Event')
+                        .setEmoji('👁️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
     
             await message.reply({ 
                 embeds: [embed],
+                components: [predictionButtonsRow],
                 files: [{
                     attachment: './src/images/FightGenie_Logo_1.PNG',
                     name: 'FightGenie_Logo_1.PNG'

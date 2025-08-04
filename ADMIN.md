@@ -91,7 +91,7 @@ $syncpredictions - add predictions from stored_predictions to prediction_outcome
 ### Sunday
 - **Time**: 2:00 PM
 - **Content**: Model Competition / Battle Report
-- Shows comparison between GPT-4 and Claude's prediction accuracy
+- Shows comparison between GPT and Claude's prediction accuracy
 - Includes win rates, method accuracy, and confidence metrics
 
 ### Monday

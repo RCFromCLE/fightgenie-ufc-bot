@@ -15,6 +15,8 @@ const PredictCommand = require("./src/commands/predict");
 const ModelCommand = require("./src/commands/ModelCommand");
 const ModelStatsCommand = require("./src/commands/ModelStatsCommand");
 const CheckStatsCommand = require("./src/commands/CheckStatsCommand");
+const DonateCommand = require("./src/commands/DonateCommand"); // Added DonateCommand
+const SubscriptionCommand = require("./src/commands/SubscriptionCommand"); // Ensure SubscriptionCommand is imported if not already
 const database = require("./src/database");
 const FighterStats = require("./src/utils/fighterStats");
 const DataValidator = require("./src/utils/DataValidator");
@@ -26,6 +28,14 @@ const AdminEventCommand = require("./src/commands/AdminEventCommand");
 const MarketAnalysis = require("./src/utils/MarketAnalysis");
 const TweetAutomation = require("./src/utils/TweetAutomation");
 const AdminPredictionCommand = require('./src/commands/AdminPredictionCommand');
+const UpdateFighterStatsCommand = require('./src/commands/UpdateFighterStatsCommand');
+// Removed PaymentCommand and related service imports as they are no longer needed
+// const PaymentCommand = require("./src/commands/PaymentCommand");
+// const PaymentHandler = require("./src/utils/PaymentHandler");
+// const PayPalService = require("./src/utils/PayPalService");
+// const StripePaymentService = require("./src/utils/StripePaymentService");
+// const SolanaPaymentService = require("./src/utils/SolanaPaymentService");
+// const SolanaPriceService = require("./src/utils/SolanaPriceService");
 
 const COMMAND_PREFIX = "$";
 const MAX_RETRIES = 3;
@@ -74,8 +84,6 @@ checkEnvironmentVariables();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
 });
@@ -185,6 +193,136 @@ client.on("messageCreate", async (message) => {
         }
         await AdminEventCommand.forceUpdateCurrentEvent(message);
         break;
+        
+      case "updatefighterstats":
+        if (message.guild?.id !== "496121279712329756") {
+          console.log(`Unauthorized updatefighterstats attempt from guild ${message.guild?.id}`);
+          return;
+        }
+        if (!message.member?.permissions.has("Administrator")) {
+          await message.reply("❌ This command requires administrator permissions.");
+          return;
+        }
+        await UpdateFighterStatsCommand.handleUpdateAllFighterStats(message);
+        break;
+        
+      case "runallpredictions":
+        if (message.guild?.id !== "496121279712329756") {
+          console.log(`Unauthorized runallpredictions attempt from guild ${message.guild?.id}`);
+          return;
+        }
+        if (!message.member?.permissions.has("Administrator")) {
+          await message.reply("❌ This command requires administrator permissions.");
+          return;
+        }
+        
+        try {
+          const loadingEmbed = new EmbedBuilder()
+            .setColor('#ffff00')
+            .setTitle('🔄 Running All Predictions')
+            .setDescription([
+              'Generating predictions for:',
+              '• Main Card - GPT',
+              '• Main Card - Claude',
+              '• Preliminary Card - GPT',
+              '• Preliminary Card - Claude',
+              '',
+              'This may take a few minutes. Please wait...'
+            ].join('\n'));
+          
+          const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
+          
+          // Get the event
+          const event = await EventHandlers.getUpcomingEvent();
+          if (!event) {
+            await loadingMsg.edit({
+              content: "No upcoming events found.",
+              embeds: []
+            });
+            return;
+          }
+          
+          // Create a mock interaction object for the PredictionHandler
+          const mockInteraction = {
+            editReply: async (content) => {
+              await loadingMsg.edit(content);
+            },
+            deferUpdate: async () => {},
+            deferred: true,
+            replied: true,
+            message: loadingMsg
+          };
+          
+          // Run all predictions sequentially
+          const results = [];
+          
+          // Main Card - GPT
+          try {
+            await PredictionHandler.generateNewPredictions(mockInteraction, event, "main", "gpt");
+            results.push("✅ Main Card - GPT");
+          } catch (error) {
+            console.error("Error generating Main Card GPT predictions:", error);
+            results.push("❌ Main Card - GPT");
+          }
+          
+          // Main Card - Claude
+          try {
+            await PredictionHandler.generateNewPredictions(mockInteraction, event, "main", "claude");
+            results.push("✅ Main Card - Claude");
+          } catch (error) {
+            console.error("Error generating Main Card Claude predictions:", error);
+            results.push("❌ Main Card - Claude");
+          }
+          
+          // Prelims - GPT
+          try {
+            await PredictionHandler.generateNewPredictions(mockInteraction, event, "prelims", "gpt");
+            results.push("✅ Preliminary Card - GPT");
+          } catch (error) {
+            console.error("Error generating Prelim GPT predictions:", error);
+            results.push("❌ Preliminary Card - GPT");
+          }
+          
+          // Prelims - Claude
+          try {
+            await PredictionHandler.generateNewPredictions(mockInteraction, event, "prelims", "claude");
+            results.push("✅ Preliminary Card - Claude");
+          } catch (error) {
+            console.error("Error generating Prelim Claude predictions:", error);
+            results.push("❌ Preliminary Card - Claude");
+          }
+          
+          // Create completion embed
+          const completionEmbed = new EmbedBuilder()
+            .setColor('#00ff00')
+            .setTitle('✅ Predictions Generated')
+            .setDescription([
+              `Generated predictions for ${event.Event}:`,
+              '',
+              ...results,
+              '',
+              'Use `$upcoming` to view the event and access predictions.'
+            ].join('\n'));
+          
+          const viewEventButton = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder()
+                .setCustomId(`view_event_${event.event_id}`)
+                .setLabel('View Event')
+                .setEmoji('👁️')
+                .setStyle(ButtonStyle.Primary)
+            );
+          
+          await loadingMsg.edit({
+            embeds: [completionEmbed],
+            components: [viewEventButton]
+          });
+          
+        } catch (error) {
+          console.error("Error running all predictions:", error);
+          await message.reply("Error generating predictions. Please try again.");
+        }
+        break;
 
       case "checkstats":
         await CheckStatsCommand.handleCheckStats(message, args);
@@ -194,10 +332,25 @@ client.on("messageCreate", async (message) => {
         await ModelStatsCommand.handleModelStatsCommand(message);
         break;
 
+      // Added donate command
+      case "donate":
+        await DonateCommand.handleDonateCommand(message);
+        break;
+
+      // Keep sub command (now repurposed)
+      case "sub":
+        await SubscriptionCommand.handleSubscriptionStatus(message);
+        break;
+
       case "help":
         const helpEmbed = createHelpEmbed();
         await message.reply({ embeds: [helpEmbed] });
         break;
+
+      // Removed buy command case
+      // case "buy":
+      //   await PaymentCommand.handleBuyCommand(message);
+      //   break;
 
       default:
         await message.reply(`Unknown command. Use ${COMMAND_PREFIX}help to see available commands.`);
@@ -213,9 +366,264 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // Check interaction age immediately - Discord interactions expire after 3 seconds for initial response
+  const interactionAge = Date.now() - interaction.createdTimestamp;
+  if (interactionAge > 2800) { // 2.8 seconds - slightly less conservative to allow more interactions through
+    console.log(`Interaction too old (${interactionAge}ms), ignoring to prevent errors`);
+    return;
+  }
+
   try {
+    // Handle Slash Commands
+    if (interaction.isChatInputCommand()) {
+      const { commandName } = interaction;
+
+      // Immediately defer all slash commands to prevent timeout
+      try {
+        await interaction.deferReply();
+      } catch (error) {
+        console.error("Failed to defer slash command interaction:", error);
+        return;
+      }
+
+      switch (commandName) {
+        case 'upcoming':
+          await retryCommand(async () => {
+            
+            try {
+              const event = await EventHandlers.getUpcomingEvent();
+              if (!event) {
+                await interaction.editReply({
+                  content: "No upcoming events found.",
+                });
+                return;
+              }
+
+              const response = await EventHandlers.createEventEmbed(event, false);
+              await interaction.editReply(response);
+            } catch (error) {
+              console.error("Error creating upcoming event embed:", error);
+              await interaction.editReply({
+                content: "Error loading upcoming event data. Please try again.",
+              });
+            }
+          });
+          break;
+
+        case 'predict':
+          const fighter1 = interaction.options.getString('fighter1');
+          const fighter2 = interaction.options.getString('fighter2');
+          const card = interaction.options.getString('card');
+          const model = interaction.options.getString('model');
+          
+          if (fighter1 && fighter2) {
+            // Handle specific fighter prediction
+            await interaction.editReply({
+              content: `Prediction for ${fighter1} vs ${fighter2} is not yet implemented via slash commands. Please use the /upcoming command and use the buttons to generate predictions.`
+            });
+          } else {
+            // Show upcoming event with prediction options
+            await retryCommand(async () => {
+              
+              try {
+                const event = await EventHandlers.getUpcomingEvent();
+                if (!event) {
+                  await interaction.editReply({
+                    content: "No upcoming events found.",
+                  });
+                  return;
+                }
+
+                const response = await EventHandlers.createEventEmbed(event, false);
+                await interaction.editReply(response);
+              } catch (error) {
+                console.error("Error creating upcoming event embed:", error);
+                await interaction.editReply({
+                  content: "Error loading upcoming event data. Please try again.",
+                });
+              }
+            });
+          }
+          break;
+
+        case 'model':
+          const modelType = interaction.options.getString('type');
+          if (modelType) {
+            await ModelCommand.handleModelCommand(interaction, [modelType]);
+          } else {
+            await ModelCommand.handleModelCommand(interaction, []);
+          }
+          break;
+
+        case 'stats':
+          const fighterName = interaction.options.getString('fighter');
+          if (fighterName) {
+            await CheckStatsCommand.handleCheckStats(interaction, [fighterName]);
+          } else {
+            await ModelStatsCommand.handleModelStatsCommand(interaction);
+          }
+          break;
+
+        case 'checkstats':
+          const fighter = interaction.options.getString('fighter');
+          await CheckStatsCommand.handleCheckStats(interaction, [fighter]);
+          break;
+
+        case 'donate':
+          await DonateCommand.handleDonateCommand(interaction);
+          break;
+
+        case 'sub':
+          await SubscriptionCommand.handleSubscriptionStatus(interaction);
+          break;
+
+        case 'help':
+          const helpEmbed = createSlashHelpEmbed();
+          await interaction.editReply({ embeds: [helpEmbed] });
+          break;
+
+        case 'admin':
+          const subcommand = interaction.options.getSubcommand();
+          
+          // Check permissions
+          if (interaction.guild?.id !== "496121279712329756") {
+            console.log(`Unauthorized admin attempt from guild ${interaction.guild?.id}`);
+            await interaction.editReply({ content: "❌ Admin commands are not available in this server.", ephemeral: true });
+            return;
+          }
+          if (!interaction.member?.permissions.has("Administrator")) {
+            await interaction.editReply({ content: "❌ This command requires administrator permissions.", ephemeral: true });
+            return;
+          }
+
+          switch (subcommand) {
+            case 'advance':
+              await AdminEventCommand.handleAdvanceEvent(interaction);
+              break;
+            case 'forceupdate':
+              await AdminEventCommand.forceUpdateCurrentEvent(interaction);
+              break;
+            case 'updatefighterstats':
+              await UpdateFighterStatsCommand.handleUpdateAllFighterStats(interaction);
+              break;
+            case 'runallpredictions':
+              try {
+                const loadingEmbed = new EmbedBuilder()
+                  .setColor('#ffff00')
+                  .setTitle('🔄 Running All Predictions')
+                  .setDescription([
+                    'Generating predictions for:',
+                    '• Main Card - GPT',
+                    '• Main Card - Claude',
+                    '• Preliminary Card - GPT',
+                    '• Preliminary Card - Claude',
+                    '',
+                    'This may take a few minutes. Please wait...'
+                  ].join('\n'));
+                
+                await interaction.editReply({ embeds: [loadingEmbed] });
+                
+                // Get the event
+                const event = await EventHandlers.getUpcomingEvent();
+                if (!event) {
+                  await interaction.editReply({
+                    content: "No upcoming events found.",
+                  });
+                  return;
+                }
+                
+                // Run all predictions sequentially
+                const results = [];
+                
+                // Main Card - GPT
+                try {
+                  await PredictionHandler.generateNewPredictions(interaction, event, "main", "gpt");
+                  results.push("✅ Main Card - GPT");
+                } catch (error) {
+                  console.error("Error generating Main Card GPT predictions:", error);
+                  results.push("❌ Main Card - GPT");
+                }
+                
+                // Main Card - Claude
+                try {
+                  await PredictionHandler.generateNewPredictions(interaction, event, "main", "claude");
+                  results.push("✅ Main Card - Claude");
+                } catch (error) {
+                  console.error("Error generating Main Card Claude predictions:", error);
+                  results.push("❌ Main Card - Claude");
+                }
+                
+                // Prelims - GPT
+                try {
+                  await PredictionHandler.generateNewPredictions(interaction, event, "prelims", "gpt");
+                  results.push("✅ Preliminary Card - GPT");
+                } catch (error) {
+                  console.error("Error generating Prelim GPT predictions:", error);
+                  results.push("❌ Preliminary Card - GPT");
+                }
+                
+                // Prelims - Claude
+                try {
+                  await PredictionHandler.generateNewPredictions(interaction, event, "prelims", "claude");
+                  results.push("✅ Preliminary Card - Claude");
+                } catch (error) {
+                  console.error("Error generating Prelim Claude predictions:", error);
+                  results.push("❌ Preliminary Card - Claude");
+                }
+                
+                // Create completion embed
+                const completionEmbed = new EmbedBuilder()
+                  .setColor('#00ff00')
+                  .setTitle('✅ Predictions Generated')
+                  .setDescription([
+                    `Generated predictions for ${event.Event}:`,
+                    '',
+                    ...results,
+                    '',
+                    'Use `/upcoming` to view the event and access predictions.'
+                  ].join('\n'));
+                
+                const viewEventButton = new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder()
+                      .setCustomId(`view_event_${event.event_id}`)
+                      .setLabel('View Event')
+                      .setEmoji('👁️')
+                      .setStyle(ButtonStyle.Primary)
+                  );
+                
+                await interaction.editReply({
+                  embeds: [completionEmbed],
+                  components: [viewEventButton]
+                });
+                
+              } catch (error) {
+                console.error("Error running all predictions:", error);
+                await interaction.editReply("Error generating predictions. Please try again.");
+              }
+              break;
+            case 'syncpredictions':
+              await AdminPredictionCommand.handleSyncPredictions(interaction);
+              break;
+          }
+          break;
+
+        default:
+          await interaction.editReply({ content: `Unknown command: ${commandName}`, ephemeral: true });
+      }
+      return;
+    }
+
     // Handle Select Menus
     if (interaction.isStringSelectMenu()) {
+      // Defer select menu interactions immediately
+      try {
+        await interaction.deferUpdate();
+      } catch (error) {
+        console.error("Failed to defer select menu interaction:", error);
+        return;
+      }
+
       // Handle view_historical_predictions select menu
       if (interaction.customId === "view_historical_predictions") {
         const [type, eventId, timestamp] = interaction.values[0].split("_");
@@ -240,8 +648,17 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isButton()) {
-      if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferUpdate().catch(console.error);
+      // Defer button interactions immediately
+      try {
+        await interaction.deferUpdate();
+      } catch (error) {
+        // If deferUpdate fails, it might already be deferred or replied to
+        if (error.code === 40060) {
+          console.log("Button interaction already acknowledged, continuing...");
+        } else {
+          console.error("Failed to defer button interaction:", error);
+          return;
+        }
       }
 
       // Special handling for market analysis
@@ -254,22 +671,294 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       switch (action) {
+        case "run_all_predictions":
+          const eventId = args[0];
+          try {
+            
+            const loadingEmbed = new EmbedBuilder()
+              .setColor('#ffff00')
+              .setTitle('🔄 Running All Predictions')
+              .setDescription([
+                'Generating predictions for:',
+                '• Main Card - GPT',
+                '• Main Card - Claude',
+                '• Preliminary Card - GPT',
+                '• Preliminary Card - Claude',
+                '',
+                'This may take a few minutes. Please wait...'
+              ].join('\n'));
+            
+            await interaction.editReply({ 
+              embeds: [loadingEmbed],
+              components: [] 
+            });
+            
+            // Get the event
+            const event = await EventHandlers.getUpcomingEvent();
+            if (!event) {
+              await interaction.editReply({
+                content: "No upcoming events found.",
+                embeds: []
+              });
+              return;
+            }
+            
+            // Run all predictions sequentially
+            const results = [];
+            
+            // Main Card - GPT
+            try {
+              await PredictionHandler.generateNewPredictions(interaction, event, "main", "gpt");
+              results.push("✅ Main Card - GPT");
+            } catch (error) {
+              console.error("Error generating Main Card GPT predictions:", error);
+              results.push("❌ Main Card - GPT");
+            }
+            
+            // Main Card - Claude
+            try {
+              await PredictionHandler.generateNewPredictions(interaction, event, "main", "claude");
+              results.push("✅ Main Card - Claude");
+            } catch (error) {
+              console.error("Error generating Main Card Claude predictions:", error);
+              results.push("❌ Main Card - Claude");
+            }
+            
+            // Prelims - GPT
+            try {
+              await PredictionHandler.generateNewPredictions(interaction, event, "prelims", "gpt");
+              results.push("✅ Preliminary Card - GPT");
+            } catch (error) {
+              console.error("Error generating Prelim GPT predictions:", error);
+              results.push("❌ Preliminary Card - GPT");
+            }
+            
+            // Prelims - Claude
+            try {
+              await PredictionHandler.generateNewPredictions(interaction, event, "prelims", "claude");
+              results.push("✅ Preliminary Card - Claude");
+            } catch (error) {
+              console.error("Error generating Prelim Claude predictions:", error);
+              results.push("❌ Preliminary Card - Claude");
+            }
+            
+            // Create completion embed
+            const completionEmbed = new EmbedBuilder()
+              .setColor('#00ff00')
+              .setTitle('✅ Predictions Generated')
+              .setDescription([
+                `Generated predictions for ${event.Event}:`,
+                '',
+                ...results,
+                '',
+                'Use `$upcoming` to view the event and access predictions.'
+              ].join('\n'));
+            
+            const viewEventButton = new ActionRowBuilder()
+              .addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`view_event_${event.event_id}`)
+                  .setLabel('View Event')
+                  .setEmoji('👁️')
+                  .setStyle(ButtonStyle.Primary)
+              );
+            
+            await interaction.editReply({
+              embeds: [completionEmbed],
+              components: [viewEventButton]
+            });
+            
+          } catch (error) {
+            console.error("Error running all predictions:", error);
+            await interaction.editReply({
+              content: "Error generating predictions. Please try again.",
+              embeds: []
+            });
+          }
+          break;
+          
+        case "update_fighter_stats":
+          try {
+            
+            const loadingEmbed = new EmbedBuilder()
+              .setColor('#ffff00')
+              .setTitle('🔄 Updating Fighter Stats')
+              .setDescription('Fetching current event fighters and updating their stats...');
+            
+            await interaction.editReply({ 
+              embeds: [loadingEmbed],
+              components: [] 
+            });
+            
+            // Get the event
+            const statsEvent = await EventHandlers.getUpcomingEvent();
+            if (!statsEvent) {
+              await interaction.editReply({
+                content: "No upcoming events found.",
+                embeds: []
+              });
+              return;
+            }
+            
+            // Get all fights for the event
+            const fights = await database.getEventFights(statsEvent.Event);
+            if (!fights || fights.length === 0) {
+              await interaction.editReply({
+                content: "No fights found for the current event.",
+                embeds: []
+              });
+              return;
+            }
+            
+            // Extract all fighter names
+            const fighters = new Set();
+            fights.forEach(fight => {
+              fighters.add(fight.fighter1);
+              fighters.add(fight.fighter2);
+            });
+            
+            const fighterArray = Array.from(fighters);
+            const totalFighters = fighterArray.length;
+            
+            // Update progress embed
+            const progressEmbed = new EmbedBuilder()
+              .setColor('#ffff00')
+              .setTitle('🔄 Updating Fighter Stats')
+              .setDescription([
+                `Event: ${statsEvent.Event}`,
+                `Total fighters to update: ${totalFighters}`,
+                '',
+                'This process may take a few minutes. Please wait...',
+                '',
+                '⏳ Starting updates...'
+              ].join('\n'));
+            
+            await interaction.editReply({ embeds: [progressEmbed] });
+            
+            // Update stats for each fighter
+            const results = [];
+            let successCount = 0;
+            let failCount = 0;
+            
+            for (let i = 0; i < fighterArray.length; i++) {
+              const fighter = fighterArray[i];
+              try {
+                // Update progress every 3 fighters
+                if (i % 3 === 0) {
+                  const updatedProgressEmbed = new EmbedBuilder()
+                    .setColor('#ffff00')
+                    .setTitle('🔄 Updating Fighter Stats')
+                    .setDescription([
+                      `Event: ${statsEvent.Event}`,
+                      `Progress: ${i}/${totalFighters} fighters`,
+                      '',
+                      'This process may take a few minutes. Please wait...',
+                      '',
+                      `⏳ Currently updating: ${fighter}`
+                    ].join('\n'));
+                  
+                  await interaction.editReply({ embeds: [updatedProgressEmbed] });
+                }
+                
+                // Update fighter stats
+                const updatedStats = await FighterStats.updateFighterStats(fighter);
+                
+                if (updatedStats) {
+                  results.push(`✅ ${fighter}`);
+                  successCount++;
+                } else {
+                  results.push(`❌ ${fighter} (not found)`);
+                  failCount++;
+                }
+              } catch (error) {
+                console.error(`Error updating stats for ${fighter}:`, error);
+                results.push(`❌ ${fighter} (error)`);
+                failCount++;
+              }
+              
+              // Add a small delay to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            // Create completion embed
+            const completionEmbed = new EmbedBuilder()
+              .setColor('#00ff00')
+              .setTitle('✅ Fighter Stats Update Complete')
+              .setDescription([
+                `Event: ${statsEvent.Event}`,
+                `Successfully updated: ${successCount}/${totalFighters} fighters`,
+                `Failed: ${failCount}/${totalFighters} fighters`,
+                '',
+                '**Results:**',
+                results.join('\n')
+              ].join('\n'));
+            
+            const runPredictionsButton = new ActionRowBuilder()
+              .addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`run_all_predictions_${statsEvent.event_id}`)
+                  .setLabel('Run All Predictions')
+                  .setEmoji('🔄')
+                  .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                  .setCustomId(`view_event_${statsEvent.event_id}`)
+                  .setLabel('View Event')
+                  .setEmoji('👁️')
+                  .setStyle(ButtonStyle.Secondary)
+              );
+            
+            await interaction.editReply({
+              embeds: [completionEmbed],
+              components: [runPredictionsButton]
+            });
+            
+          } catch (error) {
+            console.error("Error updating fighter stats:", error);
+            await interaction.editReply({
+              content: "Error updating fighter stats. Please try again.",
+              embeds: []
+            });
+          }
+          break;
+          
+        case "view_event":
+          const viewEventId = args[0];
+          try {
+            
+            const event = await EventHandlers.getUpcomingEvent();
+            if (!event) {
+              await interaction.editReply({
+                content: "No upcoming events found.",
+                embeds: []
+              });
+              return;
+            }
+            
+            const response = await EventHandlers.createEventEmbed(event, false);
+            await interaction.editReply(response);
+            
+          } catch (error) {
+            console.error("Error viewing event:", error);
+            await interaction.editReply({
+              content: "Error loading event. Please try again.",
+              embeds: []
+            });
+          }
+          break;
+          
         case "predict":
-          const [cardType, model, eventId] = args;
+          const [cardType, model, predictEventId] = args;
           await PredictionHandler.handlePredictionRequest(
             interaction,
             cardType,
             model,
-            eventId
+            predictEventId
           );
           break;
 
         case 'market_analysis': {
           const eventId = args[0];
           try {
-            if (!interaction.deferred && !interaction.replied) {
-              await interaction.deferUpdate();
-            }
 
             const event = await EventHandlers.getUpcomingEvent();
             if (!event) {
@@ -365,7 +1054,7 @@ client.on("interactionCreate", async (interaction) => {
               .slice(0, 2);
 
             const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
-            const modelName = currentModel === "gpt" ? "GPT-4o" : "Claude-3.5";
+            const modelName = currentModel === "gpt" ? "GPT" : "Claude";
 
             // Create main analysis embed
             const marketAnalysisEmbed = new EmbedBuilder()
@@ -621,20 +1310,74 @@ function createHelpEmbed() {
         value: "```Show the next upcoming UFC event with predictions & analysis```",
       },
       {
-        name: "🤖 $model [Claude-3.5/gpt]",
-        value: "```Switch between Claude-3.5 and GPT-4o for predictions\nDefault: GPT-4o```",
+        name: "🤖 $model [claude/gpt]",
+        value: "```Switch between Claude and GPT for predictions\nDefault: GPT```",
       },
       {
         name: "📊 $stats",
-        value: "```Compare prediction accuracy between Claude-3.5 and GPT-4o models\nUpdated the following day after each event```",
+        value: "```Compare prediction accuracy between Claude and GPT models\nUpdated the following day after each event```",
       },
       {
         name: "👤 $checkstats [fighter name]",
         value: "```• View all fighter stats used for prediction analysis\n• Force update stats from ufcstats.com\n• Use when stats are outdated/missing```",
+      },
+      {
+        name: "ℹ️ $sub", // Updated description for $sub
+        value: "```Check bot status and learn about supporting Fight Genie```",
+      },
+      {
+        name: "💖 $donate", // Added $donate command
+        value: "```Support Fight Genie's development and server costs```",
+      }
+      // Removed $buy command from help
+    )
+    .setFooter({
+      text: "Data from UFCStats.com | Powered by Claude & GPT | Fight Genie 1.1",
+      iconURL: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",
+    });
+}
+
+function createSlashHelpEmbed() {
+  return new EmbedBuilder()
+    .setColor("#0099ff")
+    .setTitle("Fight Genie Slash Commands")
+    .setDescription("Welcome to Fight Genie! Here are the available slash commands:")
+    .addFields(
+      {
+        name: "📅 /upcoming",
+        value: "```Show the next upcoming UFC event with predictions & analysis```",
+      },
+      {
+        name: "🔮 /predict",
+        value: "```Generate or view fight predictions\nOptions: fighter1, fighter2, card, model```",
+      },
+      {
+        name: "🤖 /model [type]",
+        value: "```Switch between Claude and GPT for predictions\nDefault: GPT```",
+      },
+      {
+        name: "📊 /stats [fighter]",
+        value: "```Compare prediction accuracy between models\nOptional: Check specific fighter stats```",
+      },
+      {
+        name: "👤 /checkstats <fighter>",
+        value: "```View fighter stats used for prediction analysis\nForce update stats from ufcstats.com```",
+      },
+      {
+        name: "ℹ️ /sub",
+        value: "```Check bot status and learn about supporting Fight Genie```",
+      },
+      {
+        name: "💖 /donate",
+        value: "```Support Fight Genie's development and server costs```",
+      },
+      {
+        name: "🔧 /admin",
+        value: "```Admin commands (restricted access)\nSubcommands: advance, forceupdate, updatefighterstats, runallpredictions, syncpredictions```",
       }
     )
     .setFooter({
-      text: "Data from UFCStats.com | Powered by Claude-3.5 & GPT-4o | Fight Genie 1.0",
+      text: "Data from UFCStats.com | Powered by Claude & GPT | Fight Genie 2.0",
       iconURL: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",
     });
 }
@@ -647,8 +1390,9 @@ client.once("ready", () => {
 
 async function startup() {
   try {
+    // Database is initialized when required via its constructor
     console.log("Initializing database...");
-    await database.initializeDatabase();
+    // await database.initializeDatabase(); // Removed redundant call
     console.log("Database initialized");
 
     const events = await database.query(`

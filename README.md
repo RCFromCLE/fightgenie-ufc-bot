@@ -8,7 +8,7 @@ https://fightgenie.ai/
 
 https://rudycorradetti.com/2024/12/04/fight-genie-ai-nodejs-discord-bot-ufc-predictions/
 
-Fight Genie is an advanced UFC fight prediction system utilizing dual AI models (GPT-4o and Claude-3.5 3.5 Sonnet), real-time odds integration, and comprehensive statistical analysis to provide accurate fight predictions and betting insights.
+Fight Genie is an advanced UFC fight prediction system utilizing dual AI models (GPT and Claude Sonnet), real-time odds integration, and comprehensive statistical analysis to provide accurate fight predictions and betting insights.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -26,18 +26,15 @@ Fight Genie is an advanced UFC fight prediction system utilizing dual AI models 
 - Real-time fight predictions using dual AI models
 - Live betting odds integration
 - Comprehensive fighter statistics
-- Secure payment processing (PayPal & Solana)
 - Privacy-focused data handling
 - Automated event management
 - Detailed statistical analysis
 
-### Access Tiers
+### Access Model
 
-- Below is outdated. The Genie is 100% free!
+Fight Genie is now **100% FREE** to use! All features are available to everyone.
 
-- Event Access: $6.99 (expires 1:30 AM EST post-event)
-- Lifetime Access: $50.00 (permanent server access)
-- Solana Payments: 10% discount on all tiers
+If you find the bot valuable, please consider supporting its development and server costs using the `$donate` command.
 
 ## System Architecture
 
@@ -61,9 +58,9 @@ stored_predictions
   - prediction_id, event_id, card_type
   - model_used, prediction_data, created_at
 
-server_subscriptions
-  - server_id, subscription_type, payment_id
-  - status, event_id, expiration_date
+-- server_subscriptions (REMOVED - No longer used)
+-- payment_logs (REMOVED - No longer used)
+-- solana_payments (REMOVED - No longer used)
 ```
 
 ### Data Pipeline
@@ -149,55 +146,9 @@ Edge Formula:
    ⭐⭐⭐: 10%+ edge, 60%+ confidence
 ```
 
-### Payment Integration
+### Payment Integration (REMOVED)
 
-#### Solana Integration (outdated, Genie is free)
-```javascript
-Price Determination:
-1. Jupiter API query for current SOL price
-2. Apply 10% platform discount
-3. Calculate SOL amount
-4. Real-time conversion updates
-```
-
-#### Stripe (Apple Pay) Integration Integration (Genie is now free, outdated)
-```javascript
-1. Creates secure checkout sessions with:
-- Apple Pay and card payment options
-- 30 minute timeout
-- Success/cancel URL handling
-- Event/lifetime access tiers
-
-2. Validates and processes webhooks:
-- Signature verification
-- Success/failure event handling
-- Database status updates
-- Subscription activation
-
-3. Verifies payments via:
-- Session lookup
-- Payment status checks
-- Record updates
-- User notifications
-
-4. Manages payment records in database:
-- Payment IDs
-- Server links
-- Status tracking
-- Audit history
-```
-
-
-#### PayPal Processing
-```javascript
-
-- No longer relevant, genie is free.
-Payment Flow:
-1. Create PayPal order
-2. Process payment
-3. Verify transaction
-4. Activate subscription
-```
+Payment processing (PayPal, Solana, Stripe) has been removed as the bot is now free.
 
 ## Security & Privacy
 
@@ -205,9 +156,7 @@ Payment Flow:
 ```javascript
 Stored Data (Minimal):
 - Discord Server ID
-- Discord Admin ID
-- Payment Reference ID
-- Subscription Status
+- Discord Admin ID (for specific admin commands)
 
 Not Stored:
 - Personal Information
@@ -234,14 +183,48 @@ User Commands:
 $upcoming - Show current event
 $predict - Generate predictions
 $checkstats - Fighter statistics
-$buy - Purchase access
-$subscription - Check status
+$sub - Check bot status
+$donate - Support Fight Genie's development
 
 Admin Commands:
-- $promo CODE - Users can redeem a promo code for event access
-- $checkpromos - Admin only: View status of all promo codes
-- $createnewcodes - Admin only: Generate new codes for next event
+(Admin commands related to payments/promos removed)
+- $advance - Advance to the next event (Admin only)
+- $forceupdate - Force update current event data (Admin only)
+- $syncpredictions - Sync predictions (Admin only)
 ```
+
+### Manual Tweet Triggering
+You can manually trigger specific tweet types using the `TweetAutomation.js` script directly from the command line. This is useful if a scheduled tweet fails or needs to be posted outside the schedule.
+
+**Usage:**
+```bash
+node src/utils/TweetAutomation.js <tweet_type>
+```
+
+Replace `<tweet_type>` with one of the following:
+
+-   **Fight Analysis Thread:**
+    ```bash
+    node src/utils/TweetAutomation.js fight_analysis
+    ```
+-   **Value Pick Tweet:**
+    ```bash
+    node src/utils/TweetAutomation.js value_pick
+    ```
+-   **Model Competition Thread:**
+    ```bash
+    node src/utils/TweetAutomation.js model_competition
+    ```
+-   **Weekly State Thread:**
+    ```bash
+    node src/utils/TweetAutomation.js weekly_state
+    ```
+-   **UFC History/Promo Tweet:**
+    ```bash
+    node src/utils/TweetAutomation.js ufc_history_promo
+    ```
+
+**Note:** This script respects the `TWEET_TEST_MODE` environment variable set in your `.env` file. If set to `true`, tweets will be logged to the console and `tweet-logs.txt` instead of being posted to Twitter.
 
 ### Support
 For technical support or inquiries:

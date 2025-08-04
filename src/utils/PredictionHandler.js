@@ -24,6 +24,7 @@ class PredictionHandler {
             FROM events 
             WHERE Date IN (date('now', '-1 day'), date('now'))
             AND Event LIKE 'UFC%'
+            AND is_completed = 0 -- Added this check
             ORDER BY Date DESC
             LIMIT 1
         `;
@@ -57,6 +58,7 @@ class PredictionHandler {
                   FROM events 
                   WHERE Date >= date('now')
                   AND Event LIKE 'UFC%'
+                  AND is_completed = 0 -- Added this check
                   ORDER BY Date ASC 
                   LIMIT 1
               `;
@@ -109,16 +111,33 @@ class PredictionHandler {
 
   static async handlePredictionRequest(interaction, cardType, model) {
     try {
+      // Check if interaction is still valid before processing - be very conservative
+      const interactionAge = Date.now() - interaction.createdTimestamp;
+      if (interactionAge > 2500) { // 2.5 seconds for initial response
+        console.log(`Prediction interaction too old (${interactionAge}ms), ignoring to prevent errors`);
+        return;
+      }
+
+      // Only defer if not already deferred or replied
       if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferUpdate();
+        try {
+          await interaction.deferUpdate();
+        } catch (error) {
+          console.error("Failed to defer interaction:", error);
+          return;
+        }
       }
 
       const event = await this.getUpcomingEvent();
       if (!event) {
-        await interaction.editReply({
-          content: "No upcoming events found.",
-          ephemeral: true,
-        });
+        try {
+          await interaction.editReply({
+            content: "No upcoming events found.",
+            ephemeral: true,
+          });
+        } catch (error) {
+          console.error("Failed to edit reply:", error);
+        }
         return;
       }
 
@@ -136,7 +155,7 @@ class PredictionHandler {
             "• Calculating win probabilities and confidence levels",
             "• Generating parlay and prop recommendations",
             "",
-            `Using ${model.toUpperCase() === "GPT" ? "GPT-4o" : "Claude-3.5"
+            `Using ${model.toUpperCase() === "GPT" ? "GPT" : "Claude"
             } for enhanced fight analysis...`,
           ].join("\n")
         )
@@ -146,13 +165,38 @@ class PredictionHandler {
 
       await interaction.editReply({ embeds: [loadingEmbed] });
 
-      // Generate or retrieve predictions
+      // Check if we need to generate new predictions
+      let forceNewPredictions = false;
+      
+      // Get stored predictions
       const storedPredictions = await this.getStoredPrediction(
         event.event_id,
         cardType,
         model
       );
+      
+      // If we have stored predictions, check if they're for the current event
       if (storedPredictions) {
+        // Check if the first fight in the predictions matches a fight in the current event
+        const fights = await database.getEventFights(event.Event);
+        if (fights && fights.length > 0 && storedPredictions.fights && storedPredictions.fights.length > 0) {
+          const currentFighters = new Set();
+          fights.forEach(fight => {
+            currentFighters.add(fight.fighter1);
+            currentFighters.add(fight.fighter2);
+          });
+          
+          // Check if the first predicted fight's fighters are in the current event
+          const firstPrediction = storedPredictions.fights[0];
+          if (!currentFighters.has(firstPrediction.fighter1) || !currentFighters.has(firstPrediction.fighter2)) {
+            console.log("Stored predictions are for a different event. Generating new predictions.");
+            forceNewPredictions = true;
+          }
+        }
+      }
+      
+      // Use stored predictions if available and valid for current event
+      if (storedPredictions && !forceNewPredictions) {
         await this.displayPredictions(
           interaction,
           storedPredictions,
@@ -163,6 +207,7 @@ class PredictionHandler {
         return;
       }
 
+      // Generate new predictions if none stored or if they're for a different event
       await this.generateNewPredictions(interaction, event, cardType, model);
     } catch (error) {
       console.error("Error handling prediction request:", error);
@@ -212,7 +257,7 @@ class PredictionHandler {
             });
         }
 
-        const modelName = model === "gpt" ? "GPT-4o" : "Claude-3.5";
+        const modelName = model === "gpt" ? "GPT" : "Claude";
 
         // Create two rows of buttons for better organization
         const mainButtonsRow = new ActionRowBuilder().addComponents(
@@ -250,10 +295,28 @@ class PredictionHandler {
         if (lowConfidenceWarning) {
             setTimeout(async () => {
                 try {
-                    await interaction.followUp({
-                        content: `${warningMessage}\n\n*This message is only visible to you.*`,
-                        ephemeral: true
-                    });
+                    // Check if the interaction object has a followUp method
+                    if (interaction.followUp) {
+                        await interaction.followUp({
+                            content: `${warningMessage}\n\n*This message is only visible to you.*`,
+                            ephemeral: true
+                        });
+                    } else if (interaction.channel && interaction.user) {
+                        // Alternative approach if followUp is not available
+                        // This handles mock interactions created for commands like runallpredictions
+                        console.log("Using alternative warning display method");
+                        // Add warning to the main message instead
+                        const updatedEmbed = EmbedBuilder.from(embed)
+                            .setFooter({
+                                text: `${modelName} Analysis • Fight Genie 1.1 • ${warningMessage}`,
+                                iconURL: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png"
+                            });
+                        
+                        await interaction.editReply({
+                            embeds: [updatedEmbed],
+                            components: [mainButtonsRow, secondaryButtonsRow]
+                        });
+                    }
                 } catch (error) {
                     console.error("Error sending warning followup:", error);
                 }
@@ -275,7 +338,7 @@ class PredictionHandler {
     model,
     cardType = "main"
   ) {
-    const modelName = model.toLowerCase() === "gpt" ? "GPT-4o" : "Claude-3.5";
+    const modelName = model.toLowerCase() === "gpt" ? "GPT" : "Claude";
     const modelEmoji = model === "gpt" ? "🧠" : "🤖";
 
     // Get high confidence picks
@@ -378,7 +441,7 @@ class PredictionHandler {
     }
 
     embed.setFooter({
-      text: `${modelName} Analysis • Fight Genie 1.0 • Stats from UFCStats.com`,
+      text: `${modelName} Analysis • Fight Genie 1.1 • Stats from UFCStats.com`,
       iconURL:
         "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/2560px-UFC_Logo.svg.png",
     });
@@ -505,7 +568,7 @@ class PredictionHandler {
         return;
       }
 
-      const modelName = model === "gpt" ? "GPT-4o" : "Claude-3.5";
+      const modelName = model === "gpt" ? "GPT" : "Claude";
       const modelEmoji = model === "gpt" ? "🧠" : "🤖";
 
       // Get predictions from database
@@ -991,7 +1054,7 @@ class PredictionHandler {
                 "• Calculating win probabilities and confidence levels",
                 "• Generating parlay and prop recommendations",
                 "",
-                `Using ${model.toUpperCase() === "GPT" ? "GPT-4" : "Claude-3.5"} for enhanced fight analysis...`
+                `Using ${model.toUpperCase() === "GPT" ? "GPT" : "Claude"} for enhanced fight analysis...`
             ].join("\n"));
 
         await interaction.editReply({ embeds: [loadingEmbed] });
