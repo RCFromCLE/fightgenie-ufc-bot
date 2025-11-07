@@ -84,7 +84,7 @@ static async handleOddsCommand(interaction, model, eventId, bookmaker = 'fanduel
         }
 
         const currentEventId = eventId || event.event_id;
-        const currentModel = ModelCommand.getCurrentModel();
+        const currentModel = ModelCommand.getCurrentModel(interaction?.guild?.id);
         
         console.log(`Handling odds for event ID: ${currentEventId}, card type: ${cardType}`);
 

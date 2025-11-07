@@ -10,7 +10,7 @@ class StatsDisplayHandler {
 
     static async handleShowFighterStats(interaction) {
         try {
-            await interaction.deferUpdate();
+            // Don't defer here - it's already deferred in index.js
 
             const currentEvent = await database.query(
                 `SELECT event_id FROM events WHERE Date >= date('now') ORDER BY Date ASC LIMIT 1`

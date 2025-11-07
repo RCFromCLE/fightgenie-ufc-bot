@@ -256,27 +256,39 @@ class CommonOpponentAnalyzer {
                 `SELECT Method FROM events WHERE Winner = ?`,
                 [fighterName]
             );
-            
-            // Count KO/TKO, submissions, and decisions
-            const koCount = winMethods.filter(w => 
-                w.Method.includes('KO') || w.Method.includes('TKO')
-            ).length;
-            
-            const subCount = winMethods.filter(w => 
-                w.Method.includes('Submission')
-            ).length;
-            
-            const decCount = winMethods.filter(w => 
-                w.Method.includes('Decision')
-            ).length;
-            
+
+            // Count KO/TKO, submissions, and decisions (null-safe)
+            const koCount = winMethods.filter(w => {
+                const m = (w.Method || '').toLowerCase();
+                return m.includes('ko') || m.includes('tko');
+            }).length;
+
+            const subCount = winMethods.filter(w => {
+                const m = (w.Method || '').toLowerCase();
+                return m.includes('submission') || m.includes('sub');
+            }).length;
+
+            const decCount = winMethods.filter(w => {
+                const m = (w.Method || '').toLowerCase();
+                return m.includes('decision') || m.includes('dec');
+            }).length;
+
             const totalWins = koCount + subCount + decCount;
-            
+
             // Determine style based on stats and win methods
             const slpm = parseFloat(fighterStats.SLPM) || 0;
             const tdAvg = parseFloat(fighterStats.TDAvg) || 0;
             const subAvg = parseFloat(fighterStats.SubAvg) || 0;
-            
+
+            // If we have no classified wins yet, fall back to stats-only heuristics
+            if (totalWins === 0) {
+                if (slpm > 3.5 && tdAvg < 1.0) return "Striker";
+                if (subAvg > 1.0 || tdAvg > 2.5) return "Submission Grappler";
+                if (tdAvg > 2.0) return "Control Grappler";
+                if (slpm > 3.0 && tdAvg > 1.5) return "Mixed";
+                return "Balanced";
+            }
+
             // Style classification logic
             if (koCount / totalWins > 0.5 && slpm > 3.5) {
                 return "Striker";

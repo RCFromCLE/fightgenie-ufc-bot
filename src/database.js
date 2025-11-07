@@ -858,6 +858,47 @@ async insertEventFight(event, fight) {
     }
   }
 
+  // Safe delete method that handles foreign key constraints properly
+  async safeDeleteEventByName(eventName) {
+    try {
+      console.log(`Safely deleting event: ${eventName}`);
+      
+      // Get all event_ids for this event name
+      const eventIds = await this.query("SELECT DISTINCT event_id FROM events WHERE Event = ?", [eventName]);
+      
+      for (const { event_id } of eventIds) {
+        console.log(`Cleaning up event_id: ${event_id}`);
+        
+        // Delete dependent records first (in correct order to avoid foreign key constraints)
+        await this.query("DELETE FROM prediction_outcomes WHERE event_id = ?", [event_id]);
+        await this.query("DELETE FROM stored_predictions WHERE event_id = ?", [event_id]);
+        await this.query("DELETE FROM odds_history WHERE event_id = ?", [event_id]);
+        
+        // Check for other tables that might reference event_id
+        try {
+          const marketAnalysisExists = await this.query("SELECT name FROM sqlite_master WHERE type='table' AND name='market_analysis'");
+          if (marketAnalysisExists.length > 0) {
+            const columns = await this.query("PRAGMA table_info(market_analysis)");
+            const hasEventId = columns.some(col => col.name === 'event_id');
+            if (hasEventId) {
+              await this.query("DELETE FROM market_analysis WHERE event_id = ?", [event_id]);
+            }
+          }
+        } catch (err) {
+          // Table might not exist, continue
+        }
+      }
+      
+      // Finally delete the events
+      const result = await this.query("DELETE FROM events WHERE Event = ?", [eventName]);
+      console.log(`Successfully deleted all data for: ${eventName}`);
+      return result;
+    } catch (error) {
+      console.error(`Error safely deleting event ${eventName}:`, error);
+      throw error;
+    }
+  }
+
   parseLocation(location) {
     try {
       console.log("Parsing location:", location);

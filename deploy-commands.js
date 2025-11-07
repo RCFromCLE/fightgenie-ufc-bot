@@ -36,11 +36,7 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('stats')
-        .setDescription('Compare prediction accuracy between Claude and GPT models')
-        .addStringOption(option =>
-            option.setName('fighter')
-                .setDescription('Fighter name to check stats for')
-                .setRequired(false)),
+        .setDescription('Compare prediction accuracy between Claude and GPT models'),
     
     new SlashCommandBuilder()
         .setName('model')
@@ -67,8 +63,8 @@ const commands = [
         .setDescription('Support Fight Genie\'s development and server costs'),
     
     new SlashCommandBuilder()
-        .setName('sub')
-        .setDescription('Check bot status and learn about supporting Fight Genie'),
+        .setName('status')
+        .setDescription('View bot status, stats, and helpful information'),
     
     new SlashCommandBuilder()
         .setName('help')
@@ -81,23 +77,75 @@ const commands = [
         .addSubcommand(subcommand =>
             subcommand
                 .setName('advance')
-                .setDescription('Advance to the next event'))
+                .setDescription('Advance to the next event')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('forceupdate')
-                .setDescription('Force update current event'))
+                .setDescription('Force update current event')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('updatefighterstats')
-                .setDescription('Update all fighter stats for current event'))
+                .setDescription('Update all fighter stats for current event')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('runallpredictions')
-                .setDescription('Generate all predictions for current event'))
+                .setDescription('Generate all predictions for current event')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('syncpredictions')
-                .setDescription('Sync predictions from database'))
+                .setDescription('Sync predictions from database')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('rollback')
+                .setDescription('Rollback to a previous event')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('enableadminmode')
+                .setDescription('Enable admin mode - restrict bot to admin server only')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('disableadminmode')
+                .setDescription('Disable admin mode - allow bot to respond to all servers')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('adminstatus')
+                .setDescription('Check current admin mode status')
+                .addStringOption(option =>
+                    option.setName('password')
+                        .setDescription('Admin password')
+                        .setRequired(true)))
 ];
 
 const rest = new REST().setToken(process.env.DISCORD_TOKEN);

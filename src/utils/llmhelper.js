@@ -182,9 +182,9 @@ Provide predictions in this exact JSON format:
 }`;
 
       if (model === "gpt") {
-          return await generatePredictionsWithGPT(enhancedPrompt);
+          return await generatePredictionsWithGPT(enhancedPrompt, enrichedFights);
       } else {
-          return await generatePredictionsWithClaude(enhancedPrompt);
+          return await generatePredictionsWithClaude(enhancedPrompt, enrichedFights);
       }
   } catch (error) {
       console.error("Error in generateEnhancedPredictionsWithAI:", error);
@@ -1072,7 +1072,7 @@ Respond with only the JSON object, no markdown formatting.`;
   }
 }
 
-async function generatePredictionsWithClaude(prompt) {
+async function generatePredictionsWithClaude(prompt, fightData = []) {
   try {
       let ClaudeResponse;
       let retryCount = 0;
@@ -1118,7 +1118,7 @@ async function generatePredictionsWithClaude(prompt) {
                   
                   if (retryCount >= maxRetries) {
                       console.log("Claude API overloaded after all retries, generating simplified prediction...");
-                      return generateSimplifiedPrediction();
+                      return generateSimplifiedPrediction(fightData);
                   }
                   
                   // Wait longer for server errors
@@ -1134,20 +1134,20 @@ async function generatePredictionsWithClaude(prompt) {
 
       if (!ClaudeResponse?.content || !Array.isArray(ClaudeResponse.content) || ClaudeResponse.content.length === 0) {
           console.error("Invalid response structure from Claude after all retries");
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
       const textContent = ClaudeResponse.content.find(item => item.type === "text");
       if (!textContent || !textContent.text) {
           console.error("No text content found in Claude response");
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
       // Extract JSON from response
       const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
           console.error("No JSON found in Claude response");
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
       // Clean and parse the JSON
@@ -1160,21 +1160,21 @@ async function generatePredictionsWithClaude(prompt) {
           // Validate required structure
           if (!parsedJson.fights || !Array.isArray(parsedJson.fights)) {
               console.error("Invalid prediction format - missing fights array");
-              return generateSimplifiedPrediction();
+              return generateSimplifiedPrediction(fightData);
           }
 
           // Validate each fight has required fields
           for (const fight of parsedJson.fights) {
               if (!fight.fighter1 || !fight.fighter2 || !fight.predictedWinner) {
                   console.error("Invalid fight format - missing required fields");
-                  return generateSimplifiedPrediction();
+                  return generateSimplifiedPrediction(fightData);
               }
           }
 
           return parsedJson;
       } catch (parseError) {
           console.error("JSON Parse Error:", parseError.message);
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
   } catch (error) {
@@ -1185,27 +1185,89 @@ async function generatePredictionsWithClaude(prompt) {
           error.message.includes("rate limit") || 
           error.status === 429) {
           console.log("Rate/token limit hit, generating simplified prediction...");
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
       // If it's a parsing error, try to recover with simplified prediction
       if (error.message.includes("JSON")) {
           console.log("JSON parsing error, generating simplified prediction...");
-          return generateSimplifiedPrediction();
+          return generateSimplifiedPrediction(fightData);
       }
 
       throw error;
   }
 }
 
-function generateSimplifiedPrediction() {
-  return {
-      fights: [],
-      betting_analysis: {
-          upsets: "Unable to generate detailed analysis at this time.",
-          parlays: "Unable to generate parlay suggestions at this time.",
-          props: "Unable to generate prop bet suggestions at this time."
+function generateSimplifiedPrediction(fightData = []) {
+  console.log("Generating simplified prediction for", fightData.length, "fights");
+  
+  // If we have fight data, create basic predictions
+  if (fightData && fightData.length > 0) {
+    const simplifiedFights = fightData.map(fight => {
+      // Basic prediction based on available data
+      const fighter1Name = fight.fighter1 || fight.Fighter1 || "Fighter 1";
+      const fighter2Name = fight.fighter2 || fight.Fighter2 || "Fighter 2";
+      
+      // Simple heuristic: if we have basic stats, use them; otherwise random
+      let predictedWinner = fighter1Name;
+      let confidence = 60; // Conservative confidence
+      
+      // Try to make a basic prediction based on any available stats
+      if (fight.fighter1Stats?.basics && fight.fighter2Stats?.basics) {
+        const f1Stats = fight.fighter1Stats.basics;
+        const f2Stats = fight.fighter2Stats.basics;
+        
+        // Simple comparison based on striking accuracy and volume
+        const f1Score = (parseFloat(f1Stats.StrAcc?.replace('%', '') || 50) + parseFloat(f1Stats.SLPM || 3)) / 2;
+        const f2Score = (parseFloat(f2Stats.StrAcc?.replace('%', '') || 50) + parseFloat(f2Stats.SLPM || 3)) / 2;
+        
+        if (f2Score > f1Score) {
+          predictedWinner = fighter2Name;
+        }
+        
+        // Adjust confidence based on score difference
+        const scoreDiff = Math.abs(f1Score - f2Score);
+        confidence = Math.min(75, 55 + scoreDiff);
       }
+      
+      return {
+        fighter1: fighter1Name,
+        fighter2: fighter2Name,
+        predictedWinner: predictedWinner,
+        confidence: confidence,
+        method: "Decision", // Conservative method prediction
+        reasoning: "Simplified prediction due to API limitations. Basic statistical comparison used.",
+        keyFactors: [
+          "Limited analysis due to API overload",
+          "Basic statistical comparison applied",
+          "Conservative confidence rating used"
+        ],
+        probabilityBreakdown: {
+          ko_tko: 25,
+          submission: 15,
+          decision: 60
+        }
+      };
+    });
+    
+    return {
+      fights: simplifiedFights,
+      betting_analysis: {
+        upsets: "API temporarily overloaded. Basic predictions provided with conservative confidence ratings.",
+        parlays: "Due to API limitations, consider single bets only until full analysis is available.",
+        props: "Method props not available due to API overload. Focus on straight bets."
+      }
+    };
+  }
+  
+  // Fallback if no fight data available
+  return {
+    fights: [],
+    betting_analysis: {
+      upsets: "Unable to generate analysis - API temporarily overloaded.",
+      parlays: "Unable to generate parlay suggestions - API temporarily overloaded.",
+      props: "Unable to generate prop bet suggestions - API temporarily overloaded."
+    }
   };
 }
 

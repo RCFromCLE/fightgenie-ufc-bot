@@ -26,8 +26,10 @@ class PredictCommand {
         (field) => field.name && field.name.includes("PRELIMINARY CARD")
       );
 
-      const response = await EventHandlers.createEventEmbed(event, showPrelims);
-      await interaction.message.edit(response);
+      const response = await EventHandlers.createEventEmbed(event, showPrelims, interaction);
+      
+      // Use editReply instead of message.edit to avoid channel caching issues
+      await interaction.editReply(response);
     } catch (error) {
       console.error("Error showing event:", error);
       await interaction.followUp({

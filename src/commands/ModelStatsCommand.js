@@ -1,12 +1,10 @@
 const {
-
     EmbedBuilder,
-  
     StringSelectMenuBuilder,
-  
     ActionRowBuilder,
-  
-  } = require("discord.js");
+    ButtonBuilder,
+    ButtonStyle
+} = require("discord.js");
   
   const database = require("../database");
   
@@ -22,11 +20,12 @@ const {
   
       
   
-      static async handleModelStatsCommand(message) {
+      static async handleModelStatsCommand(interaction) {
   
           try {
   
-              const loadingMsg = await message.reply({
+              // The interaction is already deferred, so use editReply
+            await interaction.editReply({
   
                   embeds: [
   
@@ -80,27 +79,8 @@ const {
   
                   WHERE prediction_data IS NOT NULL
   
-                  AND (
-  
-                      Date < date('now') 
-  
-                      OR (
-  
-                          Date = date('now') 
-  
-                          AND EXISTS (
-  
-                              SELECT 1 FROM fight_results fr 
-  
-                              WHERE fr.event_id = e.event_id 
-  
-                              AND fr.is_completed = 1
-  
-                          )
-  
-                      )
-  
-                  )
+                  -- Only include events that have already occurred (exclude future events)
+                  AND Date < date('now')
   
                   GROUP BY e.event_id, e.Event, e.Date, e.event_link
   
@@ -446,6 +426,142 @@ const {
               embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━' }); // Separator
               // --- End Double Lock Stats Field ---
 
+              // --- Add Top 10 Events Rankings ---
+              // Calculate accuracy for each event/model combination
+              const eventPerformance = allResults.map(result => ({
+                  event: result.Event,
+                  date: result.Date,
+                  model: result.model,
+                  accuracy: ((result.correct_predictions / result.fights_predicted) * 100).toFixed(1),
+                  correct: result.correct_predictions,
+                  total: result.fights_predicted,
+                  cardType: result.card_type,
+                  eventId: result.event_id
+              }));
+
+              // Create combined Main + Prelims rankings
+              const combinedByEvent = {};
+              eventPerformance.forEach(perf => {
+                  const key = `${perf.model}_${perf.eventId}`;
+                  if (!combinedByEvent[key]) {
+                      combinedByEvent[key] = {
+                          event: perf.event,
+                          date: perf.date,
+                          model: perf.model,
+                          correct: 0,
+                          total: 0
+                      };
+                  }
+                  combinedByEvent[key].correct += perf.correct;
+                  combinedByEvent[key].total += perf.total;
+              });
+
+              const combinedPerformance = Object.values(combinedByEvent).map(e => ({
+                  ...e,
+                  accuracy: ((e.correct / e.total) * 100).toFixed(1)
+              }));
+
+              // Sort combined rankings by model
+              const gptCombined = combinedPerformance
+                  .filter(e => e.model === 'gpt')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              const claudeCombined = combinedPerformance
+                  .filter(e => e.model === 'claude')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              // Group by model and card type
+              const gptMain = eventPerformance
+                  .filter(e => e.model === 'gpt' && e.cardType === 'main')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              const gptPrelims = eventPerformance
+                  .filter(e => e.model === 'gpt' && e.cardType === 'prelims')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              const claudeMain = eventPerformance
+                  .filter(e => e.model === 'claude' && e.cardType === 'main')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              const claudePrelims = eventPerformance
+                  .filter(e => e.model === 'claude' && e.cardType === 'prelims')
+                  .sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy))
+                  .slice(0, 10);
+
+              // Add GPT Combined (Main + Prelims) rankings
+              if (gptCombined.length > 0) {
+                  embed.addFields({
+                      name: "🧠 GPT Top 10 Best Events (Main + Prelims Combined)",
+                      value: gptCombined.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: false
+                  });
+              }
+
+              // Add GPT Main Card rankings
+              if (gptMain.length > 0) {
+                  embed.addFields({
+                      name: "🧠 GPT Top 10 Main Card Events",
+                      value: gptMain.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: true
+                  });
+              }
+
+              // Add GPT Prelims rankings
+              if (gptPrelims.length > 0) {
+                  embed.addFields({
+                      name: "🧠 GPT Top 10 Prelim Events",
+                      value: gptPrelims.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: true
+                  });
+              }
+
+              // Add Claude Combined (Main + Prelims) rankings
+              if (claudeCombined.length > 0) {
+                  embed.addFields({
+                      name: "🤖 Claude Top 10 Best Events (Main + Prelims Combined)",
+                      value: claudeCombined.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: false
+                  });
+              }
+
+              // Add Claude Main Card rankings
+              if (claudeMain.length > 0) {
+                  embed.addFields({
+                      name: "🤖 Claude Top 10 Main Card Events",
+                      value: claudeMain.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: true
+                  });
+              }
+
+              // Add Claude Prelims rankings
+              if (claudePrelims.length > 0) {
+                  embed.addFields({
+                      name: "🤖 Claude Top 10 Prelim Events",
+                      value: claudePrelims.map((e, i) => 
+                          `${i + 1}. ${e.event}\n   └ ${e.accuracy}% (${e.correct}/${e.total}) - ${new Date(e.date).toLocaleDateString()}`
+                      ).join('\n') || "No events available",
+                      inline: true
+                  });
+              }
+
+              embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━' }); // Separator
+              // --- End Top 10 Events Rankings ---
+
               embed.addFields({
   
                   name: " ",
@@ -529,28 +645,57 @@ const {
               });
   
       
-  
+              // Pagination for events (25 per page due to Discord limit)
+              const currentPage = 0;
+              const eventsPerPage = 25;
+              const totalPages = Math.ceil(eventOptions.length / eventsPerPage);
+              const startIndex = currentPage * eventsPerPage;
+              const endIndex = startIndex + eventsPerPage;
+              const currentPageOptions = eventOptions.slice(startIndex, endIndex);
+
               const selectMenu = new StringSelectMenuBuilder()
   
                   .setCustomId("view_historical_predictions")
   
-                  .setPlaceholder("📜 View Historical Event Predictions")
+                  .setPlaceholder(`📜 View Historical Event Predictions (Page ${currentPage + 1}/${totalPages})`)
   
-                  .addOptions(eventOptions.slice(0, 25));
+                  .addOptions(currentPageOptions);
+  
+      
+              const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+
+              // Add pagination buttons if there are multiple pages
+              const components = [selectRow];
+              if (totalPages > 1) {
+                  const buttonRow = new ActionRowBuilder().addComponents(
+                      new ButtonBuilder()
+                          .setCustomId(`events_page_prev_0`)
+                          .setLabel('◀ Previous')
+                          .setStyle(ButtonStyle.Secondary)
+                          .setDisabled(true), // Disabled on first page
+                      new ButtonBuilder()
+                          .setCustomId(`events_page_info_0`)
+                          .setLabel(`Page 1/${totalPages}`)
+                          .setStyle(ButtonStyle.Primary)
+                          .setDisabled(true),
+                      new ButtonBuilder()
+                          .setCustomId(`events_page_next_0`)
+                          .setLabel('Next ▶')
+                          .setStyle(ButtonStyle.Secondary)
+                          .setDisabled(totalPages <= 1)
+                  );
+                  components.push(buttonRow);
+              }
   
       
   
-              const row = new ActionRowBuilder().addComponents(selectMenu);
-  
-      
-  
-              await loadingMsg.edit({
+              await interaction.editReply({
   
                   content: null,
   
                   embeds: [embed],
   
-                  components: [row],
+                  components: components,
   
                   files: [{
   
@@ -568,7 +713,7 @@ const {
   
               console.error("Error handling model stats command:", error);
   
-              await message.reply({
+              await interaction.editReply({
   
                   embeds: [
   
@@ -596,7 +741,9 @@ const {
   
           try {
   
-              await interaction.deferReply({ ephemeral: true });
+              if (!interaction.deferred && !interaction.replied) {
+                  await interaction.deferReply({ ephemeral: true });
+              }
   
               const [_, eventId, timestamp] = interaction.values[0].split("_");
   
@@ -701,269 +848,227 @@ const {
                   )
   
                   .setThumbnail("attachment://FightGenie_Logo_1.PNG");
-  
-      
-  
-              for (const pred of predictions) {
-  
-                  try {
-  
-                      const predictionData = JSON.parse(pred.prediction_data);
-  
-                      const modelEmoji = pred.model_used === "gpt" ? "🧠" : "🤖";
-  
-                      const modelName = pred.model_used === "gpt" ? "GPT" : "Claude";
-  
-                      const cardType = pred.card_type === "main" ? "Main Card" : "Prelims";
-  
-      
-  
-                      const fightResults = predictionData.fights
-  
-                          .map((fight) => {
-  
-                              const matchingResult = scrapedResults.find(
-  
-                                  (r) =>
-  
-                                      (r.winner === fight.fighter1?.trim() &&
-  
-                                          r.loser === fight.fighter2?.trim()) ||
-  
-                                      (r.winner === fight.fighter2?.trim() &&
-  
-                                          r.loser === fight.fighter1?.trim())
-  
-                              );
-  
-      
-  
-                              if (!matchingResult) return null;
-  
-      
-  
-                              const predictedMethod = fight.method?.toLowerCase() || '';
-  
-                              const actualMethod = matchingResult.method?.toLowerCase() || '';
-  
-                              const isMethodCorrect = this.compareMethod(predictedMethod, actualMethod);
-  
-                              const confidenceScore = ((fight.predictedWinner?.trim() === matchingResult.winner ? 
-  
-                                  fight.confidence : 100 - fight.confidence) / 100).toFixed(2);
-  
-      
-  
-                              return {
-  
-                                  fighters: `${fight.fighter1} vs ${fight.fighter2}`,
-  
-                                  prediction: {
-  
-                                      winner: fight.predictedWinner,
-  
-                                      method: fight.method,
-  
-                                      confidence: fight.confidence,
-  
-                                  },
-  
-                                  actual: matchingResult,
-  
-                                  isCorrect: fight.predictedWinner?.trim() === matchingResult.winner,
-  
-                                  isMethodCorrect,
-  
-                                  confidenceScore
-  
-                              };
-  
-                          })
-  
-                          .filter(Boolean);
-  
-      
-  
-                      const correctCount = fightResults.filter((f) => f.isCorrect).length;
-  
-      
-  
-                      // Split fights into chunks to avoid Discord's 1024 character limit
-  
-                      const fightChunks = [];
-  
-                      let currentChunk = [];
-  
-                      let currentLength = 0;
-  
-      
-  
-                      fightResults.forEach((fight) => {
-  
-                          const fightText = [
-  
-                              `${fight.isCorrect ? "✅" : "❌"} ${fight.fighters}`,
-  
-                              `└ Predicted: ${fight.prediction.winner} by ${fight.prediction.method} (${fight.prediction.confidence}%)`,
-  
-                              `└ Actual: ${fight.actual.winner} by ${fight.actual.method}`,
-  
-                              `└ Confidence Score: ${fight.confidenceScore}`
-  
-                          ].join("\n");
-  
-      
-  
-                          if (currentLength + fightText.length + 2 > 1024) { // +2 for "\n\n"
-  
-                              fightChunks.push(currentChunk.join("\n\n"));
-  
-                              currentChunk = [];
-  
-                              currentLength = 0;
-  
-                          }
-  
-      
-  
-                          currentChunk.push(fightText);
-  
-                          currentLength += fightText.length + 2;
-  
-                      });
-  
-      
-  
-                      if (currentChunk.length > 0) {
-  
-                          fightChunks.push(currentChunk.join("\n\n"));
-  
-                      }
-  
-      
-  
-                      // Add each chunk as a separate field
-  
-                      fightChunks.forEach((chunk, index) => {
-  
-                          const fieldName = index === 0 
-  
-                              ? `${modelEmoji} ${modelName} - ${cardType} (${correctCount}/${fightResults.length} correct)`
-  
-                              : `${modelEmoji} ${modelName} - ${cardType} (Continued)`;
-  
-                          
-  
-                          embed.addFields({
-  
-                              name: fieldName,
-  
-                              value: chunk || "No verified fights found",
-  
-                              inline: false,
-  
-                          });
-  
-                      });
-  
-      
-  
-                      // Handle props
-  
-                      if (predictionData.betting_analysis?.props) {
-  
-                          try {
-  
-                              const props = Array.isArray(predictionData.betting_analysis.props)
-  
-                                  ? predictionData.betting_analysis.props
-  
-                                  : [predictionData.betting_analysis.props];
-  
-      
-  
-                              const correctProps = props.filter(prop => {
-  
-                                  if (typeof prop !== 'string') return false;
-  
-                                  const [fighter, method] = prop.split(/\s+by\s+/i).map(s => s.trim());
-  
-                                  const result = scrapedResults.find(r => 
-  
-                                      r.winner === fighter || r.loser === fighter
-  
-                                  );
-  
-                                  return result && 
-  
-                                         result.winner === fighter && 
-  
-                                         this.compareMethod(method || '', result.method);
-  
-                              });
-  
-      
-  
-                              if (correctProps.length > 0) {
-  
-                                  embed.addFields({
-  
-                                      name: "💰 Prop Bets",
-  
-                                      value: `${correctProps.length} prop bet(s) correct`,
-  
-                                      inline: false
-  
-                                  });
-  
-                              }
-  
-                          } catch (error) {
-  
-                              console.error('Error processing props:', error);
-  
-                          }
-  
-                      }
-  
-      
-  
-                  } catch (error) {
-  
-                      console.error("Error processing prediction:", error);
-  
-                      continue;
-  
+              
+              // Pagination helpers: Discord allows max 25 fields per embed
+              const embedPages = [embed];
+              let currentEmbedRef = embed;
+              let totalCorrect = 0;
+              let totalFights = 0;
+              
+              function addField(name, value, inline = false) {
+                  const fieldCount = (currentEmbedRef.data.fields?.length || 0);
+                  if (fieldCount >= 25) {
+                      const next = new EmbedBuilder()
+                        .setColor("#0099ff")
+                        .setTitle(`📊 ${event[0].Event} (continued)`)
+                        .setThumbnail("attachment://FightGenie_Logo_1.PNG");
+                      embedPages.push(next);
+                      currentEmbedRef = next;
                   }
-  
+                  currentEmbedRef.addFields({ name, value, inline });
               }
   
       
   
-              await interaction.editReply({
+              // Build sections deterministically for both models and both card types,
+              // so Claude sections are always considered (when present).
+              const models = ['gpt', 'claude'];
+              const cardTypes = ['main', 'prelims'];
   
-                  embeds: [embed],
+              for (const modelKey of models) {
+                  const modelEmoji = modelKey === "gpt" ? "🧠" : "🤖";
+                  const modelName = modelKey === "gpt" ? "GPT" : "Claude";
   
+                  for (const card of cardTypes) {
+                      // Get the latest stored prediction for this model/card
+                      // Look for predictions by event name to handle duplicate event IDs
+                      const rows = await database.query(
+                          `
+                          SELECT sp.prediction_data
+                          FROM stored_predictions sp
+                          JOIN events e ON sp.event_id = e.event_id
+                          WHERE e.Event = ?
+                          AND LOWER(sp.model_used) = LOWER(?)
+                          AND LOWER(sp.card_type) = LOWER(?)
+                          ORDER BY sp.created_at DESC
+                          LIMIT 1
+                          `,
+                          [event[0].Event, modelKey, card]
+                      );
+                      
+                      if (!rows?.length) {
+                          // Add a field showing no predictions found for this model/card
+                          const prettyCard = card === "main" ? "Main Card" : "Prelims";
+                          addField(
+                              `${modelEmoji} ${modelName} - ${prettyCard}`,
+                              `*No predictions found for ${modelName} ${prettyCard}*`,
+                              false
+                          );
+                          continue;
+                      }
+  
+                      try {
+                          const predictionData = JSON.parse(rows[0].prediction_data);
+                          const fightsArray = Array.isArray(predictionData.fights) ? predictionData.fights : [];
+                          if (fightsArray.length === 0) continue;
+  
+                          const fightResults = fightsArray
+                              .map((fight) => {
+                                  const matchingResult = scrapedResults.find(
+                                      (r) =>
+                                          (r.winner === fight.fighter1?.trim() && r.loser === fight.fighter2?.trim()) ||
+                                          (r.winner === fight.fighter2?.trim() && r.loser === fight.fighter1?.trim())
+                                  );
+                                  if (!matchingResult) return null;
+  
+                                  const predictedMethod = fight.method?.toLowerCase() || '';
+                                  const actualMethod = matchingResult.method?.toLowerCase() || '';
+                                  const isMethodCorrect = this.compareMethod(predictedMethod, actualMethod);
+                                  
+                                  return {
+                                      fighters: `${fight.fighter1} vs ${fight.fighter2}`,
+                                      prediction: {
+                                          winner: fight.predictedWinner,
+                                          method: fight.method,
+                                          confidence: fight.confidence,
+                                      },
+                                      actual: matchingResult,
+                                      isCorrect: fight.predictedWinner?.trim() === matchingResult.winner,
+                                      isMethodCorrect
+                                  };
+                              })
+                              .filter(Boolean);
+  
+                          const correctCount = fightResults.filter((f) => f.isCorrect).length;
+                          totalCorrect += correctCount;
+                          totalFights += fightResults.length;
+  
+                          // Split fights into chunks to avoid Discord's 1024 character limit
+                          const fightChunks = [];
+                          let currentChunk = [];
+                          let currentLength = 0;
+  
+                          fightResults.forEach((fight) => {
+                              const fightText = [
+                                  `${fight.isCorrect ? "✅" : "❌"} **${fight.fighters}**`,
+                                  `📍 Pick: **${fight.prediction.winner}** (${fight.prediction.confidence}%)`,
+                                  `🏆 Result: **${fight.actual.winner}** by ${fight.actual.method}`
+                              ].join("\n");
+  
+                              if (currentLength + fightText.length + 2 > 1024) {
+                                  fightChunks.push(currentChunk.join("\n\n"));
+                                  currentChunk = [];
+                                  currentLength = 0;
+                              }
+                              currentChunk.push(fightText);
+                              currentLength += fightText.length + 2;
+                          });
+  
+                          if (currentChunk.length > 0) {
+                              fightChunks.push(currentChunk.join("\n\n"));
+                          }
+  
+                          // Add each chunk as a separate field
+                          fightChunks.forEach((chunk, index) => {
+                              const prettyCard = card === "main" ? "Main Card" : "Prelims";
+                              const fieldName =
+                                  index === 0
+                                      ? `${modelEmoji} ${modelName} - ${prettyCard} (${correctCount}/${fightResults.length} correct)`
+                                      : `${modelEmoji} ${modelName} - ${prettyCard} (Continued)`;
+                              addField(fieldName, chunk || "No verified fights found", false);
+                          });
+  
+                          // Props summary if available
+                          if (predictionData.betting_analysis?.props) {
+                              try {
+                                  const props = Array.isArray(predictionData.betting_analysis.props)
+                                      ? predictionData.betting_analysis.props
+                                      : [predictionData.betting_analysis.props];
+                                  const correctProps = props.filter((prop) => {
+                                      if (typeof prop !== "string") return false;
+                                      const [fighter, method] = prop.split(/\s+by\s+/i).map((s) => s.trim());
+                                      const result = scrapedResults.find(
+                                          (r) => r.winner === fighter || r.loser === fighter
+                                      );
+                                      return (
+                                          result &&
+                                          result.winner === fighter &&
+                                          this.compareMethod(method || "", result.method)
+                                      );
+                                  });
+                                  if (correctProps.length > 0) {
+                                      addField("💰 Prop Bets", `${correctProps.length} prop bet(s) correct`, false);
+                                  }
+                              } catch (error) {
+                                  console.error("Error processing props:", error);
+                              }
+                          }
+                      } catch (error) {
+                          console.error("Error processing model/card predictions:", error);
+                          continue;
+                      }
+                  }
+              }
+  
+      
+  
+              // Add overall summary at the end
+              if (totalFights > 0) {
+                  const overallAccuracy = ((totalCorrect / totalFights) * 100).toFixed(1);
+                  addField(
+                      "📈 Overall Event Performance",
+                      `**Total Accuracy: ${overallAccuracy}% (${totalCorrect}/${totalFights})**`,
+                      false
+                  );
+              }
+              
+              // Create back button to return to stats
+              const backButton = new ActionRowBuilder()
+                  .addComponents(
+                      new ButtonBuilder()
+                          .setCustomId('back_to_model_stats')
+                          .setLabel('← Back to Stats')
+                          .setStyle(ButtonStyle.Secondary)
+                  );
+              
+              // Send paginated embeds: first via reply/editReply, remaining via followUp
+              const firstPayload = {
+                  embeds: [embedPages[0]],
+                  components: [backButton],
                   files: [
-  
                       {
-  
                           attachment: "./src/images/FightGenie_Logo_1.PNG",
-  
                           name: "FightGenie_Logo_1.PNG",
-  
                       },
-  
                   ],
-  
-              });
+              };
+              if (interaction.deferred) {
+                  await interaction.editReply(firstPayload);
+              } else if (!interaction.replied) {
+                  await interaction.reply({ ...firstPayload, ephemeral: true });
+              } else {
+                  await interaction.followUp({ ...firstPayload, ephemeral: true });
+              }
+              // Send remaining pages (if any)
+              if (embedPages.length > 1) {
+                  for (let i = 1; i < embedPages.length; i++) {
+                      await interaction.followUp({
+                          embeds: [embedPages[i]],
+                          ephemeral: true
+                      });
+                  }
+              }
   
           } catch (error) {
-  
               console.error("Error handling historical view:", error);
-  
-              await interaction.editReply("Error retrieving historical predictions");
-  
+              const msg = "Error retrieving historical predictions";
+              if (interaction.deferred) {
+                  await interaction.editReply(msg);
+              } else if (!interaction.replied) {
+                  await interaction.reply({ content: msg, ephemeral: true });
+              } else {
+                  await interaction.followUp({ content: msg, ephemeral: true });
+              }
           }
   
       }
@@ -1168,6 +1273,103 @@ const {
   
         return false;
   
+    }
+
+    static async handleEventsPagination(interaction, direction, currentPage) {
+        try {
+            // Get all events (same query as main stats command)
+            const events = await database.query(`
+                SELECT DISTINCT 
+                    e.event_id,
+                    e.Event,
+                    e.Date,
+                    e.event_link
+                FROM events e
+                JOIN stored_predictions sp ON e.event_id = sp.event_id
+                WHERE prediction_data IS NOT NULL
+                AND Date < date('now')
+                GROUP BY e.event_id, e.Event, e.Date, e.event_link
+                ORDER BY e.Date DESC
+            `);
+
+            // Build event options
+            const eventOptions = [];
+            const seenEvents = new Set();
+            
+            events.forEach(event => {
+                const eventKey = `${event.Event}_${event.Date}`;
+                if (!seenEvents.has(eventKey)) {
+                    seenEvents.add(eventKey);
+                    eventOptions.push({
+                        label: event.Event,
+                        description: new Date(event.Date).toLocaleDateString(),
+                        value: `event_${event.event_id}_${Date.now()}`,
+                        emoji: "📊"
+                    });
+                }
+            });
+
+            // Calculate new page
+            let newPage = currentPage;
+            if (direction === 'next') {
+                newPage = currentPage + 1;
+            } else if (direction === 'prev') {
+                newPage = currentPage - 1;
+            }
+
+            // Pagination
+            const eventsPerPage = 25;
+            const totalPages = Math.ceil(eventOptions.length / eventsPerPage);
+            const startIndex = newPage * eventsPerPage;
+            const endIndex = startIndex + eventsPerPage;
+            const currentPageOptions = eventOptions.slice(startIndex, endIndex);
+
+            // Create select menu with current page
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId("view_historical_predictions")
+                .setPlaceholder(`📜 View Historical Event Predictions (Page ${newPage + 1}/${totalPages})`)
+                .addOptions(currentPageOptions);
+
+            const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+
+            // Create navigation buttons
+            const buttonRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`events_page_prev_${newPage}`)
+                    .setLabel('◀ Previous')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(newPage === 0),
+                new ButtonBuilder()
+                    .setCustomId(`events_page_info_${newPage}`)
+                    .setLabel(`Page ${newPage + 1}/${totalPages}`)
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(true),
+                new ButtonBuilder()
+                    .setCustomId(`events_page_next_${newPage}`)
+                    .setLabel('Next ▶')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(newPage >= totalPages - 1)
+            );
+
+            // Get the original message to preserve embeds
+            const message = interaction.message;
+            
+            await interaction.editReply({
+                embeds: message.embeds,
+                components: [selectRow, buttonRow],
+                files: [{
+                    attachment: "./src/images/FightGenie_Logo_1.PNG",
+                    name: "FightGenie_Logo_1.PNG"
+                }]
+            });
+
+        } catch (error) {
+            console.error("Error handling events pagination:", error);
+            await interaction.editReply({
+                content: "Error navigating events. Please try again.",
+                ephemeral: true
+            });
+        }
     }
   
   }

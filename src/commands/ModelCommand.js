@@ -1,28 +1,30 @@
 const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
 
 class ModelCommand {
-    static currentModel = 'gpt';  // Default model
+    static serverModels = new Map();  // Store models per server
 
     static async handleModelCommand(interaction, args) {
         try {
             const model = args[0]?.toLowerCase();
+            const serverId = interaction.guild?.id;
 
             if (!['claude', 'gpt'].includes(model)) {
                 await interaction.editReply('Please specify a valid model: `/model claude` or `/model gpt`');
                 return;
             }
 
-            this.currentModel = model;
+            // Set model for this specific server
+            this.serverModels.set(serverId, model);
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
             const modelName = model === 'gpt' ? 'GPT' : 'Claude'; // Updated display name
 
             const embed = new EmbedBuilder()
                 .setColor('#0099ff')
                 .setTitle('Model Selection')
-                .setDescription(`Prediction model set to ${modelName} ${modelEmoji}`)
+                .setDescription(`Prediction model set to ${modelName} ${modelEmoji} for this server`)
                 .addFields({
                     name: 'Current Settings',
-                    value: `Model: ${modelName}\nUse with upcoming fights for predictions.`
+                    value: `Model: ${modelName}\nServer: ${interaction.guild?.name || 'Unknown'}\nUse with upcoming fights for predictions.`
                 });
 
             await interaction.editReply({ embeds: [embed] });
@@ -35,8 +37,9 @@ class ModelCommand {
     static async handleModelInteraction(interaction) {
         try {
             const [_, model, eventId] = interaction.customId.split('_');
+            const serverId = interaction.guild?.id;
 
-            if (!['Claude', 'gpt'].includes(model)) {
+            if (!['claude', 'gpt'].includes(model)) {
                 // For button interactions that are already deferred, use editReply
                 if (interaction.deferred) {
                     await interaction.editReply({
@@ -52,19 +55,20 @@ class ModelCommand {
                 return;
             }
 
-            this.currentModel = model;
+            // Set model for this specific server
+            this.serverModels.set(serverId, model);
             const modelEmoji = model === 'gpt' ? '🧠' : '🤖';
             const modelName = model === 'gpt' ? 'GPT' : 'Claude'; // Updated display name
 
             // For button interactions that are already deferred, use editReply
             if (interaction.deferred) {
                 await interaction.editReply({
-                    content: `Model switched to ${modelName} ${modelEmoji}`,
+                    content: `Model switched to ${modelName} ${modelEmoji} for this server`,
                     ephemeral: true
                 });
             } else {
                 await interaction.reply({
-                    content: `Model switched to ${modelName} ${modelEmoji}`,
+                    content: `Model switched to ${modelName} ${modelEmoji} for this server`,
                     ephemeral: true
                 });
             }
@@ -85,8 +89,8 @@ class ModelCommand {
         }
     }
 
-    static getCurrentModel() {
-        return this.currentModel || 'gpt'; // default to gpt if not set
+    static getCurrentModel(serverId) {
+        return this.serverModels.get(serverId) || 'gpt'; // default to gpt if not set for this server
     }
 }
 module.exports = ModelCommand;

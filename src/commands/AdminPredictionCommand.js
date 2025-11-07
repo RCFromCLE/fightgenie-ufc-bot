@@ -4,11 +4,11 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 class AdminPredictionCommand {
-    static async handleSyncPredictions(message) {
+    static async handleSyncPredictions(interaction) {
         try {
-            if (!message.member?.permissions.has("Administrator") || 
-                message.guild?.id !== "496121279712329756") {
-                await message.reply({
+            if (!interaction.member?.permissions.has("Administrator") || 
+                interaction.guild?.id !== "496121279712329756") {
+                await interaction.editReply({
                     content: "❌ This command requires administrator permissions.",
                     ephemeral: true
                 });
@@ -20,7 +20,7 @@ class AdminPredictionCommand {
                 .setTitle('🔄 Syncing Prediction Outcomes')
                 .setDescription('Processing completed event predictions...');
 
-            const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
+            await interaction.editReply({ embeds: [loadingEmbed] });
             
             // Get predictions needing sync
             const events = await database.query(`
@@ -160,14 +160,14 @@ class AdminPredictionCommand {
                     '=== Sync Details ===',
                     ...details,
                     '',
-                    'Use `$stats` to view updated model performance.'
+                    'Use `/stats` to view updated model performance.'
                 ].join('\n'));
 
-            await loadingMsg.edit({ embeds: [completionEmbed] });
+            await interaction.editReply({ embeds: [completionEmbed] });
 
         } catch (error) {
             console.error('Error syncing predictions:', error);
-            await message.reply('Error syncing prediction outcomes. Please try again.');
+            await interaction.editReply('Error syncing prediction outcomes. Please try again.');
         }
     }
 

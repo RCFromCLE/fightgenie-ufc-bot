@@ -11,6 +11,7 @@ const FighterStats = require("./fighterStats");
 const OddsAnalysis = require("./OddsAnalysis");
 const MarketAnalysis = require('../utils/MarketAnalysis');
 const { processEventFights, processFightData } = require('./fightDataProcessor');
+const PredictionState = require('./PredictionState');
 
 class PredictionHandler {
 
@@ -141,80 +142,164 @@ class PredictionHandler {
         return;
       }
 
-      // Enhanced loading message
-      const loadingEmbed = new EmbedBuilder()
-        .setColor("#ffff00")
-        .setTitle("🤖 Fight Genie Analysis in Progress")
-        .setDescription(
-          [
-            `Analyzing ${cardType === "main" ? "Main Card" : "Preliminary Card"
-            } fights for ${event.Event}`,
-            "**Processing:**",
-            "• Gathering fighter statistics and historical data",
-            "• Analyzing style matchups and recent performance",
-            "• Calculating win probabilities and confidence levels",
-            "• Generating parlay and prop recommendations",
+      // Clean up any stale prediction sessions
+      PredictionState.cleanup();
+
+      // Check if predictions are already being generated for this event
+      if (PredictionState.isPredictionRunning(event.event_id)) {
+        console.log(`Predictions already being generated for event ${event.event_id}`);
+        
+        // Queue this request
+        PredictionState.queuePredictionRequest(event.event_id, interaction);
+        
+        // Show waiting message
+        const waitingEmbed = new EmbedBuilder()
+          .setColor("#FFA500")
+          .setTitle("⏳ Predictions Currently Being Generated")
+          .setDescription([
+            `Another user is already generating predictions for ${event.Event}.`,
             "",
-            `Using ${model.toUpperCase() === "GPT" ? "GPT" : "Claude"
-            } for enhanced fight analysis...`,
-          ].join("\n")
-        )
-        .setFooter({
-          text: "Please wait while Fight Genie processes the data...",
-        });
-
-      await interaction.editReply({ embeds: [loadingEmbed] });
-
-      // Check if we need to generate new predictions
-      let forceNewPredictions = false;
-      
-      // Get stored predictions
-      const storedPredictions = await this.getStoredPrediction(
-        event.event_id,
-        cardType,
-        model
-      );
-      
-      // If we have stored predictions, check if they're for the current event
-      if (storedPredictions) {
-        // Check if the first fight in the predictions matches a fight in the current event
-        const fights = await database.getEventFights(event.Event);
-        if (fights && fights.length > 0 && storedPredictions.fights && storedPredictions.fights.length > 0) {
-          const currentFighters = new Set();
-          fights.forEach(fight => {
-            currentFighters.add(fight.fighter1);
-            currentFighters.add(fight.fighter2);
+            "**What's happening:**",
+            "• Fight Genie is analyzing all fights for this event",
+            "• This ensures everyone gets the same high-quality predictions",
+            "• You'll receive the results automatically when ready",
+            "",
+            "Please wait while the analysis completes..."
+          ].join("\n"))
+          .setFooter({
+            text: "Fight Genie - Universal prediction system active",
           });
-          
-          // Check if the first predicted fight's fighters are in the current event
-          const firstPrediction = storedPredictions.fights[0];
-          if (!currentFighters.has(firstPrediction.fighter1) || !currentFighters.has(firstPrediction.fighter2)) {
-            console.log("Stored predictions are for a different event. Generating new predictions.");
-            forceNewPredictions = true;
-          }
-        }
-      }
-      
-      // Use stored predictions if available and valid for current event
-      if (storedPredictions && !forceNewPredictions) {
-        await this.displayPredictions(
-          interaction,
-          storedPredictions,
-          event,
-          model,
-          cardType
-        );
+
+        await interaction.editReply({ embeds: [waitingEmbed], components: [] });
         return;
       }
 
-      // Generate new predictions if none stored or if they're for a different event
-      await this.generateNewPredictions(interaction, event, cardType, model);
+      // Check for valid stored predictions with improved validation
+      const storedPredictions = await this.getStoredPredictionWithValidation(event.event_id, cardType, model);
+      
+      if (storedPredictions) {
+        // We have valid stored predictions, display them
+        await this.displayPredictions(interaction, storedPredictions, event, model, cardType);
+        return;
+      }
+
+      // No valid stored predictions, need to generate new ones
+      // Start prediction session
+      const started = PredictionState.startPrediction(event.event_id, interaction.user.id, interaction.guild?.id);
+      
+      if (!started) {
+        // This shouldn't happen due to our earlier check, but handle it just in case
+        console.log("Failed to start prediction session - already running");
+        return;
+      }
+
+      // Generate new predictions
+      await this.generateNewPredictionsWithState(interaction, event, cardType, model);
+      
     } catch (error) {
       console.error("Error handling prediction request:", error);
+      
+      // Clean up state on error
+      const event = await this.getUpcomingEvent().catch(() => null);
+      if (event) {
+        PredictionState.endPrediction(event.event_id);
+      }
+      
       await interaction.editReply({
         content: "Error generating predictions. Please try again.",
         ephemeral: true,
       });
+    }
+  }
+
+  static async getStoredPredictionWithValidation(eventId, cardType, model) {
+    try {
+      // Get stored predictions
+      const storedPredictions = await this.getStoredPrediction(eventId, cardType, model);
+      
+      if (!storedPredictions || !storedPredictions.fights || storedPredictions.fights.length === 0) {
+        console.log(`No stored predictions found for event ${eventId}, card ${cardType}, model ${model}`);
+        return null;
+      }
+      
+      console.log(`Found stored predictions for event ${eventId}, card ${cardType}, model ${model} with ${storedPredictions.fights.length} fights`);
+      
+      // Check if predictions are too old (older than 7 days) - more reasonable timeframe
+      const results = await database.query(
+        `SELECT created_at FROM stored_predictions 
+         WHERE event_id = ? AND card_type = ? AND model_used = ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [eventId, cardType, model]
+      );
+      
+      if (results && results.length > 0) {
+        const createdAt = new Date(results[0].created_at);
+        const hoursOld = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+        
+        // Only consider predictions stale if they're older than 7 days (168 hours)
+        if (hoursOld > 168) {
+          console.log(`Stored predictions are ${hoursOld.toFixed(1)} hours old (${(hoursOld/24).toFixed(1)} days), considering them stale`);
+          return null;
+        }
+        
+        console.log(`Stored predictions are ${hoursOld.toFixed(1)} hours old, still valid`);
+      }
+      
+      // Get current event to validate it's for the same event
+      const currentEvent = await this.getUpcomingEvent();
+      if (!currentEvent || currentEvent.event_id !== eventId) {
+        console.log(`Event ID mismatch: stored predictions for ${eventId}, current event is ${currentEvent?.event_id}`);
+        return null;
+      }
+      
+      // Basic validation: ensure predictions have required fields
+      const validPredictions = storedPredictions.fights.every(prediction => 
+        prediction.fighter1 && 
+        prediction.fighter2 && 
+        prediction.predictedWinner && 
+        typeof prediction.confidence === 'number' &&
+        prediction.method
+      );
+      
+      if (!validPredictions) {
+        console.log(`Stored predictions have invalid data structure, regenerating`);
+        return null;
+      }
+      
+      console.log(`Stored predictions validated successfully for event ${eventId}`);
+      return storedPredictions;
+    } catch (error) {
+      console.error("Error validating stored predictions:", error);
+      return null;
+    }
+  }
+
+  static async generateNewPredictionsWithState(interaction, event, cardType, model) {
+    try {
+      // Generate the predictions
+      await this.generateNewPredictions(interaction, event, cardType, model);
+      
+      // After successful generation, notify waiting users
+      const nextRequest = PredictionState.endPrediction(event.event_id);
+      
+      if (nextRequest) {
+        console.log(`Processing next queued request for event ${event.event_id}`);
+        
+        // Get the newly stored predictions
+        const storedPredictions = await this.getStoredPrediction(event.event_id, cardType, model);
+        
+        if (storedPredictions) {
+          try {
+            await this.displayPredictions(nextRequest, storedPredictions, event, model, cardType);
+          } catch (error) {
+            console.error("Error sending predictions to queued user:", error);
+          }
+        }
+      }
+    } catch (error) {
+      // Clean up state on error
+      PredictionState.endPrediction(event.event_id);
+      throw error;
     }
   }
 
@@ -397,45 +482,12 @@ class PredictionHandler {
       });
     }
 
-    // Add parlay recommendations if available
-    if (predictions.betting_analysis?.parlays && locks.length >= 2) {
-      const parlayContent = [];
-
-      // Two-fight parlays
-      if (locks.length >= 2) {
-        parlayContent.push(
-          `▸ ${locks[0].predictedWinner} + ${locks[1].predictedWinner
-          }\n*Combined confidence: ${(
-            (locks[0].confidence + locks[1].confidence) /
-            2
-          ).toFixed(1)}%*\n`
-        );
-
-        if (locks.length >= 3) {
-          parlayContent.push(
-            `▸ ${locks[1].predictedWinner} + ${locks[2].predictedWinner
-            }\n*Combined confidence: ${(
-              (locks[1].confidence + locks[2].confidence) /
-              2
-            ).toFixed(1)}%*\n`
-          );
-        }
-      }
-
-      // Three-fight parlay
-      if (locks.length >= 3) {
-        parlayContent.push(
-          `▸ Triple Lock Parlay:\n${locks[0].predictedWinner} + ${locks[1].predictedWinner
-          } + ${locks[2].predictedWinner}\n*Combined confidence: ${(
-            (locks[0].confidence + locks[1].confidence + locks[2].confidence) /
-            3
-          ).toFixed(1)}%*`
-        );
-      }
-
+    // Always add parlay recommendations - improved logic
+    const parlayContent = this.generateSmartParlayRecommendations(predictions.fights);
+    if (parlayContent) {
       embed.addFields({
         name: "━━━━━━━━━━━━━━━━━━━━━━\n💰 **RECOMMENDED PARLAYS**\n",
-        value: parlayContent.join("\n") + "\n",
+        value: parlayContent,
         inline: false,
       });
     }
@@ -447,6 +499,96 @@ class PredictionHandler {
     });
 
     return [embed];
+  }
+
+  static generateSmartParlayRecommendations(fights) {
+    if (!fights || fights.length === 0) return "No fights available for parlay analysis.";
+
+    // Sort fights by confidence
+    const sortedFights = [...fights].sort((a, b) => b.confidence - a.confidence);
+    
+    const locks = sortedFights.filter(f => f.confidence >= 75);
+    const highValue = sortedFights.filter(f => f.confidence >= 65);
+    const decent = sortedFights.filter(f => f.confidence >= 55);
+    
+    let parlayText = [];
+
+    // High Confidence Parlays (75%+)
+    if (locks.length >= 2) {
+      parlayText.push("🔒 **LOCK PARLAYS** (High Confidence):");
+      for (let i = 0; i < Math.min(locks.length - 1, 3); i++) {
+        const avgConf = ((locks[i].confidence + locks[i + 1].confidence) / 2).toFixed(1);
+        parlayText.push(`• ${locks[i].predictedWinner} + ${locks[i + 1].predictedWinner}`);
+        parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      }
+      
+      // Triple lock if available
+      if (locks.length >= 3) {
+        const avgConf = ((locks[0].confidence + locks[1].confidence + locks[2].confidence) / 3).toFixed(1);
+        parlayText.push(`• Triple Lock: ${locks[0].predictedWinner} + ${locks[1].predictedWinner} + ${locks[2].predictedWinner}`);
+        parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      }
+      parlayText.push("");
+    }
+
+    // Value Parlays (65%+)
+    if (highValue.length >= 2) {
+      parlayText.push("✅ **VALUE PARLAYS** (Good Confidence):");
+      const topTwo = highValue.slice(0, 2);
+      const avgConf = ((topTwo[0].confidence + topTwo[1].confidence) / 2).toFixed(1);
+      parlayText.push(`• ${topTwo[0].predictedWinner} + ${topTwo[1].predictedWinner}`);
+      parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      
+      if (highValue.length >= 3) {
+        const topThree = highValue.slice(0, 3);
+        const avgConf = (topThree.reduce((sum, f) => sum + f.confidence, 0) / 3).toFixed(1);
+        parlayText.push(`• ${topThree.map(f => f.predictedWinner).join(" + ")}`);
+        parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      }
+      parlayText.push("");
+    }
+
+    // Method-Based Parlays
+    const koFighters = sortedFights.filter(f => f.probabilityBreakdown?.ko_tko >= 50 && f.confidence >= 60);
+    const subFighters = sortedFights.filter(f => f.probabilityBreakdown?.submission >= 35 && f.confidence >= 60);
+    
+    if (koFighters.length >= 2 || subFighters.length >= 2) {
+      parlayText.push("👊 **METHOD PARLAYS**:");
+      
+      if (koFighters.length >= 2) {
+        parlayText.push(`• ${koFighters[0].predictedWinner} + ${koFighters[1].predictedWinner} by KO/TKO`);
+        parlayText.push(`  └ Finish probability parlay`);
+      }
+      
+      if (subFighters.length >= 2) {
+        parlayText.push(`• ${subFighters[0].predictedWinner} + ${subFighters[1].predictedWinner} by Submission`);
+        parlayText.push(`  └ Grappling specialist parlay`);
+      }
+      parlayText.push("");
+    }
+
+    // Conservative Parlays (for when confidence is lower)
+    if (locks.length < 2 && decent.length >= 2) {
+      parlayText.push("⚖️ **CONSERVATIVE PARLAYS** (Moderate Risk):");
+      const topTwo = decent.slice(0, 2);
+      const avgConf = ((topTwo[0].confidence + topTwo[1].confidence) / 2).toFixed(1);
+      parlayText.push(`• ${topTwo[0].predictedWinner} + ${topTwo[1].predictedWinner}`);
+      parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      parlayText.push(`  └ *Lower stakes recommended*`);
+    }
+
+    // If no good parlays available
+    if (parlayText.length === 0) {
+      parlayText.push("⚠️ **LIMITED PARLAY OPTIONS**");
+      parlayText.push("Consider single bets or wait for better opportunities.");
+      parlayText.push("");
+      parlayText.push("**Best Single Bets:**");
+      sortedFights.slice(0, 3).forEach(fight => {
+        parlayText.push(`• ${fight.predictedWinner} (${fight.confidence}%)`);
+      });
+    }
+
+    return parlayText.join("\n");
   }
 
   static splitAnalysis(fight) {
@@ -560,6 +702,14 @@ class PredictionHandler {
 
   static async sendDetailedAnalysis(interaction, predictions, event, model) {
     try {
+      console.log('Starting sendDetailedAnalysis:', {
+        hasPredictions: !!predictions,
+        hasFights: !!predictions?.fights,
+        fightsCount: predictions?.fights?.length || 0,
+        eventId: event.event_id,
+        model: model
+      });
+      
       if (!predictions?.fights) {
         await interaction.editReply({
           content: "No prediction data available. Please generate predictions first.",
@@ -571,9 +721,21 @@ class PredictionHandler {
       const modelName = model === "gpt" ? "GPT" : "Claude";
       const modelEmoji = model === "gpt" ? "🧠" : "🤖";
 
+      // Update status message
+      await interaction.editReply({
+        content: "⏳ Preparing detailed analysis...",
+        ephemeral: true
+      });
+
       // Get predictions from database
+      console.log('Fetching predictions from database...');
       const mainCardPredictions = await this.getStoredPrediction(event.event_id, "main", model);
       const prelimPredictions = await this.getStoredPrediction(event.event_id, "prelims", model);
+      
+      console.log('Predictions fetched:', {
+        mainCard: mainCardPredictions ? mainCardPredictions.fights?.length : 0,
+        prelims: prelimPredictions ? prelimPredictions.fights?.length : 0
+      });
 
       // Create embeds for main card fights
       const mainCardEmbeds = [];
@@ -598,7 +760,7 @@ class PredictionHandler {
           .setTitle(`${event.Event} - Detailed Analysis (Page ${pageNumber})`)
           .setDescription([
             `*${modelEmoji} Detailed Analysis by ${modelName} (Continued)*`,
-           `📅 ${new Date(new Date(event.Date).getTime() + (24 * 60 * 60 * 1000)).toLocaleDateString()}`,
+            `📅 ${new Date(new Date(event.Date).getTime() + (24 * 60 * 60 * 1000)).toLocaleDateString()}`,
             '',
             cardType === 'main' ?
               '**MAIN CARD PREDICTIONS (Continued)**' :
@@ -663,44 +825,78 @@ class PredictionHandler {
         }
       }
 
+      // Check if we have any embeds to send
+      if (mainCardEmbeds.length === 0 && prelimEmbeds.length === 0) {
+        console.log('No embeds created - no predictions available');
+        await interaction.editReply({
+          content: "❌ No predictions available to analyze. Please generate predictions first using the Main Card or Prelims buttons.",
+          ephemeral: true
+        });
+        return;
+      }
+
       // Send all embeds to user's DMs
       try {
+        console.log(`Sending ${mainCardEmbeds.length} main card embeds and ${prelimEmbeds.length} prelim embeds to DMs`);
+        
+        // Send initial DM to test if DMs are open
+        await interaction.user.send({
+          content: `📊 **${event.Event} - Full Analysis**\n${modelEmoji} Generated by ${modelName}\n\nDetailed predictions below:`
+        });
+        
         // Send main card embeds
-        for (const embed of mainCardEmbeds) {
-          await interaction.user.send({ embeds: [embed] });
+        for (let i = 0; i < mainCardEmbeds.length; i++) {
+          console.log(`Sending main card embed ${i + 1}/${mainCardEmbeds.length}`);
+          await interaction.user.send({ embeds: [mainCardEmbeds[i]] });
+          // Add small delay to avoid rate limiting
+          if (i < mainCardEmbeds.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         }
 
         // Send prelim embeds if they exist
         if (prelimEmbeds.length > 0) {
-          for (const embed of prelimEmbeds) {
-            await interaction.user.send({ embeds: [embed] });
+          for (let i = 0; i < prelimEmbeds.length; i++) {
+            console.log(`Sending prelim embed ${i + 1}/${prelimEmbeds.length}`);
+            await interaction.user.send({ embeds: [prelimEmbeds[i]] });
+            // Add small delay to avoid rate limiting
+            if (i < prelimEmbeds.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
           }
         }
 
-        // Send betting analysis if available
-        if (predictions.betting_analysis) {
-            const bettingAnalysisEmbed = new EmbedBuilder()
-                .setColor("#ffd700")
-                .setTitle("💰 Betting Analysis")
-                .setDescription("Detailed Betting Opportunities")
-                .addFields(
-                    {
-                        name: "🎲 Parlays",
-                        value: this.formatBettingValue(predictions.betting_analysis.parlays) || "No parlay recommendations available",
-                        inline: false
-                    },
-                    {
-                        name: "⚡ Upsets",
-                        value: this.formatBettingValue(predictions.betting_analysis.upsets) || "No upset opportunities identified",
-                        inline: false
-                    },
-                    {
-                        name: "🎯 Props",
-                        value: this.formatBettingValue(predictions.betting_analysis.props) || "No prop recommendations available",
-                        inline: false
-                    }
-                );
-            await interaction.user.send({ embeds: [bettingAnalysisEmbed] });
+        // Send enhanced betting analysis using the new methods
+        const allFights = [...(mainCardPredictions?.fights || []), ...(prelimPredictions?.fights || [])];
+        if (allFights.length > 0) {
+          const bettingAnalysisEmbed = new EmbedBuilder()
+            .setColor("#ffd700")
+            .setTitle(`💰 ${modelName} Betting Analysis`)
+            .setDescription("Enhanced Parlay & Prop Recommendations");
+
+          // Use the enhanced methods for comprehensive analysis
+          const parlaySection = this.generateEnhancedParlayRecommendations(allFights);
+          bettingAnalysisEmbed.addFields({
+            name: "🎲 Parlay Recommendations",
+            value: parlaySection,
+            inline: false,
+          });
+
+          const propSection = this.generateEnhancedPropRecommendations(allFights);
+          bettingAnalysisEmbed.addFields({
+            name: "👊 Method & Round Props",
+            value: propSection,
+            inline: false,
+          });
+
+          const valuePlays = this.generateValuePlays(allFights);
+          bettingAnalysisEmbed.addFields({
+            name: "💎 Value Opportunities",
+            value: valuePlays,
+            inline: false,
+          });
+
+          await interaction.user.send({ embeds: [bettingAnalysisEmbed] });
         }
 
         // Confirm in channel
@@ -733,65 +929,66 @@ class PredictionHandler {
         await interaction.deferUpdate();
       }
 
-      const currentModel = ModelCommand.getCurrentModel();
-      const predictions = await this.getStoredPrediction(
-        eventId || interaction.message.id,
-        "main",
-        currentModel
-      );
+      const currentModel = ModelCommand.getCurrentModel(interaction?.guild?.id);
+      
+      // Get both main card and prelim predictions for comprehensive analysis
+      const mainCardPredictions = await this.getStoredPrediction(eventId, "main", currentModel);
+      const prelimPredictions = await this.getStoredPrediction(eventId, "prelims", currentModel);
 
-      if (!predictions || !predictions.fights) {
+      // Combine all available fights
+      const allFights = [
+        ...(mainCardPredictions?.fights || []),
+        ...(prelimPredictions?.fights || [])
+      ];
+
+      if (!allFights || allFights.length === 0) {
         await interaction.editReply({
-          content: "No predictions found. Please generate predictions first.",
+          content: "No predictions found. Please generate predictions first using the Main Card or Prelims buttons.",
           ephemeral: true,
         });
         return;
       }
 
+      const modelName = currentModel === "gpt" ? "GPT" : "Claude";
+      const modelEmoji = currentModel === "gpt" ? "🧠" : "🤖";
+
       const bettingEmbed = new EmbedBuilder()
         .setColor("#ffd700")
-        .setTitle("💰 Betting Analysis 🧠")
-        .setDescription("Fight Analysis and Betting Opportunities");
+        .setTitle(`💰 ${modelName} Betting Analysis ${modelEmoji}`)
+        .setDescription([
+          "Enhanced Parlay & Prop Recommendations",
+          `Analyzing ${allFights.length} fights from both cards`,
+          ""
+        ].join("\n"));
 
-      const locks = predictions.fights.filter((pred) => pred.confidence >= 75);
+      // Generate comprehensive parlay recommendations
+      const parlaySection = this.generateEnhancedParlayRecommendations(allFights);
+      bettingEmbed.addFields({
+        name: "🎲 Parlay Recommendations",
+        value: parlaySection,
+        inline: false,
+      });
 
-      // Parlay Recommendations
-      const parlaySection = this.generateEnhancedParlayRecommendations(
-        predictions.fights
-      );
-      if (parlaySection) {
-        bettingEmbed.addFields({
-          name: "🎲 Parlay Recommendations",
-          value: parlaySection,
-          inline: false,
-        });
-      }
+      // Generate comprehensive prop recommendations
+      const propSection = this.generateEnhancedPropRecommendations(allFights);
+      bettingEmbed.addFields({
+        name: "👊 Method & Round Props",
+        value: propSection,
+        inline: false,
+      });
 
-      // Method Props
-      const propSection = this.generateEnhancedPropRecommendations(
-        predictions.fights
-      );
-      if (propSection) {
-        bettingEmbed.addFields({
-          name: "👊 Method & Round Props",
-          value: propSection,
-          inline: false,
-        });
-      }
-
-      // Value Plays
-      const valuePlays = this.generateValuePlays(predictions.fights);
-      if (valuePlays) {
-        bettingEmbed.addFields({
-          name: "💎 Value Opportunities",
-          value: valuePlays,
-          inline: false,
-        });
-      }
+      // Generate value plays
+      const valuePlays = this.generateValuePlays(allFights);
+      bettingEmbed.addFields({
+        name: "💎 Value Opportunities",
+        value: valuePlays,
+        inline: false,
+      });
 
       const navigationRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`predict_main_${currentModel}_${eventId}`)
+          .setLabel("Back to Predictions")
           .setEmoji("📊")
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
@@ -812,6 +1009,177 @@ class PredictionHandler {
         ephemeral: true,
       });
     }
+  }
+
+  static generateEnhancedParlayRecommendations(fights) {
+    if (!fights || fights.length === 0) return "No fights available for parlay analysis.";
+
+    // Sort fights by confidence
+    const sortedFights = [...fights].sort((a, b) => b.confidence - a.confidence);
+    
+    const locks = sortedFights.filter(f => f.confidence >= 75);
+    const highValue = sortedFights.filter(f => f.confidence >= 65);
+    const decent = sortedFights.filter(f => f.confidence >= 55);
+    
+    let parlayText = [];
+
+    // High Confidence Parlays (75%+)
+    if (locks.length >= 2) {
+      parlayText.push("🔒 **LOCK PARLAYS** (High Confidence):");
+      for (let i = 0; i < Math.min(locks.length - 1, 2); i++) {
+        const avgConf = ((locks[i].confidence + locks[i + 1].confidence) / 2).toFixed(1);
+        parlayText.push(`• ${locks[i].predictedWinner} + ${locks[i + 1].predictedWinner}`);
+        parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      }
+      
+      // Triple lock if available
+      if (locks.length >= 3) {
+        const avgConf = ((locks[0].confidence + locks[1].confidence + locks[2].confidence) / 3).toFixed(1);
+        parlayText.push(`• Triple Lock: ${locks[0].predictedWinner} + ${locks[1].predictedWinner} + ${locks[2].predictedWinner}`);
+        parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      }
+      parlayText.push("");
+    }
+
+    // Value Parlays (65%+)
+    if (highValue.length >= 2 && locks.length < 2) {
+      parlayText.push("✅ **VALUE PARLAYS** (Good Confidence):");
+      const topTwo = highValue.slice(0, 2);
+      const avgConf = ((topTwo[0].confidence + topTwo[1].confidence) / 2).toFixed(1);
+      parlayText.push(`• ${topTwo[0].predictedWinner} + ${topTwo[1].predictedWinner}`);
+      parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      parlayText.push("");
+    }
+
+    // Method-Based Parlays
+    const koFighters = sortedFights.filter(f => f.probabilityBreakdown?.ko_tko >= 50 && f.confidence >= 60);
+    const subFighters = sortedFights.filter(f => f.probabilityBreakdown?.submission >= 35 && f.confidence >= 60);
+    
+    if (koFighters.length >= 2 || subFighters.length >= 2) {
+      parlayText.push("👊 **METHOD PARLAYS**:");
+      
+      if (koFighters.length >= 2) {
+        parlayText.push(`• ${koFighters[0].predictedWinner} + ${koFighters[1].predictedWinner} by KO/TKO`);
+        parlayText.push(`  └ Finish probability parlay`);
+      }
+      
+      if (subFighters.length >= 2) {
+        parlayText.push(`• ${subFighters[0].predictedWinner} + ${subFighters[1].predictedWinner} by Submission`);
+        parlayText.push(`  └ Grappling specialist parlay`);
+      }
+      parlayText.push("");
+    }
+
+    // Conservative Parlays (for when confidence is lower)
+    if (locks.length < 2 && decent.length >= 2) {
+      parlayText.push("⚖️ **CONSERVATIVE PARLAYS** (Moderate Risk):");
+      const topTwo = decent.slice(0, 2);
+      const avgConf = ((topTwo[0].confidence + topTwo[1].confidence) / 2).toFixed(1);
+      parlayText.push(`• ${topTwo[0].predictedWinner} + ${topTwo[1].predictedWinner}`);
+      parlayText.push(`  └ Combined: ${avgConf}% confidence`);
+      parlayText.push(`  └ *Lower stakes recommended*`);
+      parlayText.push("");
+    }
+
+    // If no good parlays available
+    if (parlayText.length === 0) {
+      parlayText.push("⚠️ **LIMITED PARLAY OPTIONS**");
+      parlayText.push("Consider single bets or wait for better opportunities.");
+      parlayText.push("");
+      parlayText.push("**Best Single Bets:**");
+      sortedFights.slice(0, 3).forEach(fight => {
+        parlayText.push(`• ${fight.predictedWinner} (${fight.confidence}%)`);
+      });
+    }
+
+    return parlayText.join("\n");
+  }
+
+  static generateEnhancedPropRecommendations(fights) {
+    if (!fights || fights.length === 0) return "No fights available for prop analysis.";
+
+    const props = [];
+
+    fights.forEach((fight) => {
+      const { probabilityBreakdown, predictedWinner, fighter1, fighter2, confidence } = fight;
+      if (!probabilityBreakdown) return;
+
+      // Fight doesn't go to decision (high finish rate)
+      const finishRate = probabilityBreakdown.ko_tko + probabilityBreakdown.submission;
+      if (finishRate > 60) {
+        props.push(`• ${fighter1} vs ${fighter2} doesn't reach decision (${finishRate}%)`);
+      }
+
+      // Method specific props for decent confidence
+      if (confidence >= 60) {
+        if (probabilityBreakdown.ko_tko >= 45) {
+          props.push(`• ${predictedWinner} to win by KO/TKO (${probabilityBreakdown.ko_tko}%)`);
+        }
+        if (probabilityBreakdown.submission >= 30) {
+          props.push(`• ${predictedWinner} to win by Submission (${probabilityBreakdown.submission}%)`);
+        }
+        if (probabilityBreakdown.decision >= 55) {
+          props.push(`• ${predictedWinner} to win by Decision (${probabilityBreakdown.decision}%)`);
+        }
+      }
+
+      // Round props for high finish probability
+      if (probabilityBreakdown.ko_tko >= 50 && confidence >= 65) {
+        props.push(`• ${predictedWinner} to win in Round 1-2 (High KO probability)`);
+      }
+    });
+
+    // Add general props if specific ones are limited
+    if (props.length < 3) {
+      const highConfidenceFights = fights.filter(f => f.confidence >= 70);
+      highConfidenceFights.forEach(fight => {
+        props.push(`• ${fight.predictedWinner} to win (${fight.confidence}% confidence)`);
+      });
+    }
+
+    return props.length > 0 ? props.join("\n") : "No prop opportunities identified at this time.";
+  }
+
+  static generateValuePlays(fights) {
+    if (!fights || fights.length === 0) return "No fights available for value analysis.";
+
+    const valuePlays = [];
+
+    fights.forEach((fight) => {
+      const { confidence, predictedWinner, probabilityBreakdown } = fight;
+
+      if (confidence >= 60 && probabilityBreakdown) {
+        const dominantMethod = this.getDominantMethod(probabilityBreakdown);
+        if (dominantMethod) {
+          valuePlays.push(`• ${predictedWinner} ${dominantMethod.description} (${dominantMethod.probability}%)`);
+        }
+      }
+    });
+
+    // Add straight bets for high confidence picks
+    const highConfidence = fights.filter(f => f.confidence >= 70);
+    highConfidence.forEach(fight => {
+      valuePlays.push(`• ${fight.predictedWinner} straight bet (${fight.confidence}% confidence)`);
+    });
+
+    return valuePlays.length > 0
+      ? valuePlays.join("\n") + "\n\n*Consider these for straight bets or parlay pieces*"
+      : "No specific value plays identified at this time.";
+  }
+
+  static getDominantMethod(probabilityBreakdown) {
+    const { ko_tko, submission, decision } = probabilityBreakdown;
+
+    if (ko_tko > Math.max(submission, decision) && ko_tko >= 45) {
+      return { description: "by KO/TKO", probability: ko_tko };
+    }
+    if (submission > Math.max(ko_tko, decision) && submission >= 30) {
+      return { description: "by Submission", probability: submission };
+    }
+    if (decision > Math.max(ko_tko, submission) && decision >= 55) {
+      return { description: "by Decision", probability: decision };
+    }
+    return null;
   }
 
   static formatBettingValue(value) {
@@ -841,131 +1209,6 @@ class PredictionHandler {
         .join('\n');
     }
     return String(value);
-  } static generateEnhancedParlayRecommendations(fights) {
-    const locks = fights.filter((pred) => pred.confidence >= 75);
-    const highValuePicks = fights.filter((pred) => pred.confidence >= 65);
-
-    let parlayText = [];
-
-    // 2-Fight Parlays
-    if (locks.length >= 2) {
-      parlayText.push("2-Fight Parlays:");
-      // Generate all possible 2-fight combinations from locks
-      for (let i = 0; i < locks.length - 1; i++) {
-        parlayText.push(
-          `• ${locks[i].predictedWinner} + ${locks[i + 1].predictedWinner
-          }\n└ Method parlay: ${locks[i].method} + ${locks[i + 1].method}`
-        );
-      }
-      parlayText.push("");
-    }
-
-    // 3-Fight Parlays
-    if (highValuePicks.length >= 3) {
-      parlayText.push("3-Fight Parlays:");
-      const topThree = highValuePicks.slice(0, 3);
-      parlayText.push(
-        `• ${topThree
-          .map((p) => p.predictedWinner)
-          .join(" + ")}\n└ Combined confidence: ${(
-            topThree.reduce((acc, p) => acc + p.confidence, 0) / 3
-          ).toFixed(1)}%`
-      );
-      parlayText.push("");
-    }
-
-    // High-Value Combinations
-    const koFighters = fights.filter(
-      (f) => f.probabilityBreakdown?.ko_tko >= 55 && f.confidence >= 65
-    );
-    const subFighters = fights.filter(
-      (f) => f.probabilityBreakdown?.submission >= 40 && f.confidence >= 65
-    );
-
-    if (koFighters.length >= 2 || subFighters.length >= 2) {
-      parlayText.push("High-Value Combinations:");
-      if (koFighters.length >= 2) {
-        parlayText.push(
-          `• ${koFighters[0].predictedWinner} + ${koFighters[1].predictedWinner} by KO/TKO\n└ High finish probability parlay`
-        );
-      }
-      if (subFighters.length >= 2) {
-        parlayText.push(
-          `• ${subFighters[0].predictedWinner} + ${subFighters[1].predictedWinner} by Submission\n└ Grappling-focused parlay`
-        );
-      }
-    }
-
-    return parlayText.join("\n");
-  }
-
-  static generateEnhancedPropRecommendations(fights) {
-    const props = [];
-
-    fights.forEach((fight) => {
-      const { probabilityBreakdown, predictedWinner, fighter1, fighter2 } = fight;
-      if (!probabilityBreakdown) return;
-
-      // Fight doesn't go to decision
-      if (probabilityBreakdown.ko_tko + probabilityBreakdown.submission > 65) {
-        props.push(
-          `• ${fighter1} vs ${fighter2} doesn't reach decision (${probabilityBreakdown.ko_tko + probabilityBreakdown.submission}%)`
-        );
-      }
-
-      // Method specific props for high confidence
-      if (fight.confidence >= 65) {
-        if (probabilityBreakdown.ko_tko >= 50) {
-          props.push(
-            `• ${predictedWinner} to win by KO/TKO (${probabilityBreakdown.ko_tko}%)`
-          );
-        }
-        if (probabilityBreakdown.submission >= 40) {
-          props.push(
-            `• ${predictedWinner} to win by Submission (${probabilityBreakdown.submission}%)`
-          );
-        }
-      }
-    });
-
-    return props.length > 0 ? props.join("\n") : null;
-  }
-
-  static generateValuePlays(fights) {
-    const valuePlays = [];
-
-    fights.forEach((fight) => {
-      const { confidence, predictedWinner, probabilityBreakdown } = fight;
-
-      if (confidence >= 65 && probabilityBreakdown) {
-        const dominantMethod = this.getDominantMethod(probabilityBreakdown);
-        if (dominantMethod) {
-          valuePlays.push(
-            `• ${predictedWinner} ${dominantMethod.description} (${dominantMethod.probability}%)`
-          );
-        }
-      }
-    });
-
-    return valuePlays.length > 0
-      ? valuePlays.join("\n") +
-      "\n\n*Consider these for straight bets or parlay pieces*"
-      : null;
-  }
-
-  static getDominantMethod(probabilityBreakdown) {
-    const { ko_tko, submission, decision } = probabilityBreakdown;
-
-    if (ko_tko > Math.max(submission, decision) && ko_tko >= 50) {
-      return { description: "by KO/TKO", probability: ko_tko };
-    }
-    if (submission > Math.max(ko_tko, decision) && submission >= 40) {
-      return { description: "by Submission", probability: submission };
-    }
-    if (decision > Math.max(ko_tko, submission) && decision >= 60) {
-      return { description: "by Decision", probability: decision };
-    }
-    return null;
   }
 
   static async cleanupOldPredictions(daysToKeep = 30) {
@@ -1166,7 +1409,7 @@ class PredictionHandler {
 
         throw error;
     }
-}
+  }
 
   // Helper method to validate predictions
   static validatePredictions(predictions) {
@@ -1183,25 +1426,6 @@ class PredictionHandler {
       fight.probabilityBreakdown
     );
   }
-
-  // Helper method for storing predictions
-  static async storePredictions(eventId, cardType, model, predictions) {
-    try {
-      await database.query(
-        `INSERT INTO stored_predictions (
-              event_id, card_type, model_used, prediction_data, created_at
-          ) VALUES (?, ?, ?, ?, datetime('now'))`,
-        [eventId, cardType, model, JSON.stringify(predictions)]
-      );
-      console.log(`Stored predictions for event ${eventId}, card type ${cardType}`);
-    } catch (error) {
-      console.error("Error storing predictions:", error);
-      throw error;
-    }
-  }
-
-
 }
-
 
 module.exports = PredictionHandler;
